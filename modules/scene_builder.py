@@ -7,7 +7,6 @@ import math
 # User can select the robot model: "UR5" or "UR3"
 ROBOT_MODEL = "UR3"  # Change to "UR3" if needed
 
-
 # Define table dimensions and z height as variables
 table_length = 1.2
 table_width = 0.7
@@ -15,154 +14,219 @@ table_height = 0.02
 z_height = 0.01  # Table's base height from the ground
 table_top_z = z_height + table_height  # Top of the table
 
+# Define table physical properties
+table_friction = 0.01  # Friction coefficient for the table
+table_restitution = 0.6  # Coefficient of restitution for the table
+
 # Define additional parameters
 rail_thickness = 0.02
 rail_height = 0.05
 rail_z = table_height + (rail_height / 3)  # Place the bottom of the rail at the table's top surface
+
+# Define puck parameters
 puck_radius = 0.075
 puck_height = 0.02
 puck_mass = 0.17
+
+# Calculate inertia for a solid cylinder
+puck_inertia_z = 0.5 * puck_mass * puck_radius**2  # Inertia around the cylinder's axis
+puck_inertia_x = puck_inertia_y = (1/12) * puck_mass * (3 * puck_radius**2 + puck_height**2)  # Inertia around x and y axes
+
+# Puck physical properties
+puck_restitution = 0.8   # Coefficient of restitution for the puck
+puck_friction = 0.02      # Friction coefficient
+puck_rolling_friction = 0.0005   # Static friction coefficient
+puck_linear_damping = 0.005  # Linear damping for the puck
+puck_angular_damping = 0.005  # Angular damping for the puck
+
+# Define goal parameters
 goal_width = 0.2  # Width of the goal opening
+
+# Define robot parameters
 robot_base_width = 0.15  # Physical width of the robot base
+robot_z = table_top_z  # On table
+robot_offset = 0.2  # Distance behind the goal
 
-def setup_scene():
-    client = RemoteAPIClient()
-    sim = client.getObject('sim')
-    
-    print('Connected to CoppeliaSim:', sim)
 
-    sim.stopSimulation()
-    sim.startSimulation()
-    time.sleep(1)
-    
-    # Create hockey table
-    table = sim.createPrimitiveShape(sim.primitiveshape_cuboid, [table_length, table_width, table_height], 0)  # Use 0 for default options
-    sim.setObjectPosition(table, [0, 0, z_height], sim.handle_parent)  # Set table position
+#---------------------------------------------
+# Helpers
+#---------------------------------------------
 
-    # Side rails (top/bottom) - flush with table edge
-    rail_data = [
-        ([table_length, rail_thickness, rail_height], [0, table_width / 2 - rail_thickness / 2, rail_z]),
-        ([table_length, rail_thickness, rail_height], [0, -table_width / 2 + rail_thickness / 2, rail_z]),
+def set_mass_and_inertia(sim, shape, mass, inertia_diag):
+    """
+    Sets mass and simplified diagonal inertia for a given shape.
 
-        # Left goal side rails
-        ([rail_thickness, (table_width - goal_width) / 2, rail_height],
-        [-table_length / 2 + rail_thickness / 2, (goal_width + (table_width - goal_width) / 2) / 2, rail_z]),
-        ([rail_thickness, (table_width - goal_width) / 2, rail_height],
-        [-table_length / 2 + rail_thickness / 2, -(goal_width + (table_width - goal_width) / 2) / 2, rail_z]),
+    Args:
+        sim: Simulation object.
+        shape (int): Handle to the shape.
+        mass (float): Mass in kg.
+        inertia_diag (list): Diagonal elements [Ixx, Iyy, Izz] of the inertia matrix.
+    """
+    sim.setShapeMass(shape, mass)
 
-        # Right goal side rails
-        ([rail_thickness, (table_width - goal_width) / 2, rail_height],
-        [table_length / 2 - rail_thickness / 2, (goal_width + (table_width - goal_width) / 2) / 2, rail_z]),
-        ([rail_thickness, (table_width - goal_width) / 2, rail_height],
-        [table_length / 2 - rail_thickness / 2, -(goal_width + (table_width - goal_width) / 2) / 2, rail_z])
+    # Convert to 3x3 inertia matrix in row-major order
+    inertia_matrix = [
+        inertia_diag[0], 0, 0,
+        0, inertia_diag[1], 0,
+        0, 0, inertia_diag[2]
     ]
-    for size, pos in rail_data:
-        rail = sim.createPrimitiveShape(sim.primitiveshape_cuboid, size, 2)  # Enable sharp edges
-        if rail == -1:  # Check if the rail creation failed
-            raise RuntimeError(f"[ERROR] Failed to create rail with size {size} at position {pos}.")
-        sim.setShapeColor(rail, None, sim.colorcomponent_ambient_diffuse, [0, 0, 0])  # Black color
-        sim.setObjectParent(rail, table, True)  # Parent rail to table
+
+    # Identity transformation matrix: COM at origin
+    transformation_matrix = [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0
+    ]
+
+    sim.setShapeInertia(shape, inertia_matrix, transformation_matrix)
+
+def apply_physics_properties(sim, handle, properties: dict):
+    """
+    Apply Bullet physics and common properties to a shape.
+
+    Args:
+        sim: Simulation object.
+        handle: Shape handle.
+        properties (dict): Keys are property names, values are bool/float.
+    """
+    handle_name = sim.getObjectAlias(handle, 2)  # Get the handle's name
+    for k, v in properties.items():
+        print(f"Setting property '{k}' to value '{v}' for handle {handle} (name: {handle_name})")
+        if isinstance(v, bool):
+            sim.setBoolProperty(handle, k, v)
+        elif isinstance(v, float):
+            sim.setFloatProperty(handle, k, v)
+        elif isinstance(v, list):
+            sim.setVector3Property(handle, k, v)
+
+#---------------------------------------------
+# Create the table, rails, and puck  
+#---------------------------------------------
+def create_table(sim):
+    """
+    Creates the air hockey table as a cuboid and places it in the scene.
+
+    Args:
+        sim: The CoppeliaSim simulation object.
+
+    Returns:
+        int: The handle of the created table object.
+    """
+    table = sim.createPrimitiveShape(sim.primitiveshape_cuboid, [table_length, table_width, table_height], 0)
+    if table == -1:
+        raise RuntimeError("[ERROR] Failed to create table.")
+    sim.setObjectPosition(table, [0, 0, z_height], sim.handle_parent)
+    sim.setObjectInt32Param(table, sim.shapeintparam_respondable, 1)
+    sim.setObjectAlias(table, "AirHockeyTable")
+    
+    apply_physics_properties(sim, table, {
+            'respondable': True,
+            'dynamic': False,
+            'bullet.friction': table_friction,
+            'bullet.restitution': table_restitution
+        })
+    
+    return table
+
+def create_rails(sim, table):
+    """
+    Creates all side and goal rails around the table.
+
+    Args:
+        sim: The simulation object.
+        table: The handle of the hockey table.
+    """
+    def _add_rail(size, pos):
+        rail = sim.createPrimitiveShape(sim.primitiveshape_cuboid, size, 2)
+        if rail == -1:
+            raise RuntimeError(f"[ERROR] Failed to create rail at {pos}")
+        sim.setShapeColor(rail, None, sim.colorcomponent_ambient_diffuse, [0, 0, 0])
+        sim.setObjectParent(rail, table, True)
         sim.setObjectPosition(rail, pos, sim.handle_parent)
 
-    # Add red hockey puck
-    #puck_z_position = table_top_z + puck_height / 2  # Position puck on top of the table
-    puck_z_position = table_top_z #+ (puck_height / 2)  # Ensure the puck sits right on top of the table
-    puck = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [puck_radius, puck_radius, puck_height], 8)  # Correct puck size
-    sim.setObjectPosition(puck, [0, 0, puck_z_position], sim.handle_parent)  # Puck position
-    sim.setShapeColor(puck, None, sim.colorcomponent_ambient_diffuse, [1, 0, 0])  # Red color
-    sim.setObjectAlias(puck, "HockeyPuck")
+        apply_physics_properties(sim, rail, {
+            'respondable': True,
+            'dynamic': False,
+            'bullet.friction': 0.01,   # Rails should barely resist puck
+            'bullet.restitution': 0.9  # High bounce off rail
+        })
 
-    # Allow using the selected robot model
-    robot_model = f"{ROBOT_MODEL}.ttm"
-    robot_path = os.path.join(os.path.dirname(__file__), robot_model)
+    # Side and goal rails
+    half_goal_space = (table_width - goal_width) / 2
+    y_pos = (goal_width + half_goal_space) / 2
+    rail_specs = [
+        # Side rails (top/bottom)
+        ([table_length, rail_thickness, rail_height], [0,  table_width/2 - rail_thickness/2, rail_z]),
+        ([table_length, rail_thickness, rail_height], [0, -table_width/2 + rail_thickness/2, rail_z]),
+        # Goal side rails
+        ([rail_thickness, half_goal_space, rail_height], [-table_length/2 + rail_thickness/2,  y_pos, rail_z]),
+        ([rail_thickness, half_goal_space, rail_height], [-table_length/2 + rail_thickness/2, -y_pos, rail_z]),
+        ([rail_thickness, half_goal_space, rail_height], [ table_length/2 - rail_thickness/2,  y_pos, rail_z]),
+        ([rail_thickness, half_goal_space, rail_height], [ table_length/2 - rail_thickness/2, -y_pos, rail_z])
+    ]
 
-    # Load left robot
-    robot_left = sim.loadModel(robot_path)
-    if robot_left == -1:
-        raise RuntimeError(f"[ERROR] Failed to load left {ROBOT_MODEL} robot model.")
-    sim.setObjectPosition(robot_left, -1, [-0.6, 0, z_height + table_height])  # Left arm position on top of the table
-
-    # Load right robot
-    robot_right = sim.loadModel(robot_path)
-    if robot_right == -1:
-        raise RuntimeError(f"[ERROR] Failed to load right {ROBOT_MODEL} robot model.")
-    sim.setObjectPosition(robot_right, -1, [0.6, 0, z_height + table_height])  # Right arm position on top of the table
-
-    if robot_left == -1 or robot_right == -1:
-        raise RuntimeError("[ERROR] Failed to load robot models.")
-
-    # Adjust robot base positions to be on the table behind the goals
-    robot_z = table_top_z  # On table
-    robot_offset = 0.2  # Distance behind the goal
-    robot_left_pos = [-table_length / 2 - robot_offset, 0, robot_z]
-    robot_right_pos = [table_length / 2 + robot_offset, 0, robot_z]
-
-    sim.setObjectPosition(robot_left, -1, robot_left_pos)
-    sim.setObjectPosition(robot_right, -1, robot_right_pos)
-
-    # Retrieve effector handles dynamically
-    def get_effector_handle(sim, robot_handle, effector_name):
-        # Retrieve all objects in the robot's hierarchy tree
-        objects = sim.getObjectsInTree(robot_handle, sim.handle_all, 0)
-        for obj in objects:
-            # Check if the alias matches the effector name
-            if effector_name == sim.getObjectAlias(obj):
-                return obj
-        raise RuntimeError(f"[ERROR] Failed to find effector '{effector_name}' for robot.")
-
-    effector_left = get_effector_handle(sim, robot_left, "link7_visible")
-    effector_right = get_effector_handle(sim, robot_right, "link7_visible") 
-
-    # Attach paddles to the robot arms
-    def attach_paddle(sim, effector_handle, color, name):
-        # Create a flat cylindrical paddle (disc shape)
-        paddle = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [0.1, 0.1, 0.01], 8)  # [diameter_x, diameter_y, height]
+    for size, pos in rail_specs:
+        _add_rail(size, pos)
         
-        # Set color
-        sim.setShapeColor(paddle, None, sim.colorcomponent_ambient_diffuse, color)
-        
-        # Parent to effector (without keeping world pose, so we can set local position/orientation)
-        keepInPlace = False
-        sim.setObjectParent(paddle, effector_handle, keepInPlace)
-        
-        # Position relative to effector: raise slightly above the effector
-        sim.setObjectPosition(paddle, [-0.0275, 0, 0] ,sim.handle_parent)  # Local Z offset
-        
-        # Orientation: rotate 90° around Y so paddle lies flat in XZ plane
-        sim.setObjectOrientation(paddle, [0, math.radians(90), 0], sim.handle_parent)
-        # Set readable alias
-        sim.setObjectAlias(paddle, name)
 
-    attach_paddle(sim, effector_left, [0, 0, 1], "LeftPaddle")  # Blue paddle for left arm
-    attach_paddle(sim, effector_right, [0, 1, 0], "RightPaddle")  # Green paddle for right arm
+def create_puck(sim):
+    """
+    Creates and returns a dynamic hockey puck with realistic physical properties.
 
-    robot_left_alias = sim.getObjectAlias(robot_left, 2)
-    robot_right_alias = sim.getObjectAlias(robot_right, 2)
+    Args:
+        sim: Simulation object.
 
-    max_ang_vel = np.deg2rad(180)
-    max_ang_accel = np.deg2rad(40)
-    max_ang_jerk = np.deg2rad(80)
+    Returns:
+        int: Handle to the puck object.
+    """
+    puck = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [puck_radius, puck_radius, puck_height], 8)
+    if puck == -1:
+        raise RuntimeError("[ERROR] Failed to create puck.")
     
-    #initialize joint positions
-    num_joints = 6
-    sim.moveToConfig({
-        'joints': [sim.getObject(f'{robot_left_alias}/joint', {'index': idx}) 
-                   for idx in range(num_joints)],
-        'maxVel': num_joints * [max_ang_vel],
-        'maxAccel': num_joints * [max_ang_accel],
-        'maxJerk': num_joints * [max_ang_jerk],
-        'targetPos': np.deg2rad([-90, 60, 45, -15, -90, 90]).tolist()
-    })
+    sim.setObjectPosition(puck, [0, 0, table_top_z + puck_height], sim.handle_parent)
+    sim.setShapeColor(puck, None, sim.colorcomponent_ambient_diffuse, [1, 0, 0])
+    sim.setObjectAlias(puck, "HockeyPuck")
+    
+    def apply_puck_physics(sim, puck_handle):
+        inertia = [
+            puck_inertia_x,
+            puck_inertia_y,
+            puck_inertia_z
+        ]
+        inertia_matrix = [
+            inertia[0], 0, 0,
+            0, inertia[1], 0,
+            0, 0, inertia[2]
+        ]
+        sim.setShapeMass(puck_handle, puck_mass)
+        sim.setShapeInertia(puck_handle, inertia_matrix, [1,0,0,0, 0,1,0,0, 0,0,1,0])  # COM at origin
 
-    sim.moveToConfig({
-        'joints': [sim.getObject(f'{robot_right_alias}/joint', {'index': idx}) 
-                   for idx in range(num_joints)],
-        'maxVel': num_joints * [max_ang_vel],
-        'maxAccel': num_joints * [max_ang_accel],
-        'maxJerk': num_joints * [max_ang_jerk],
-        'targetPos': np.deg2rad([90, 60, 45, -15, -90, 90]).tolist()
-    })
+        apply_physics_properties(sim, puck_handle, {
+            'dynamic': True,
+            'respondable': True,
+            'bullet.friction': puck_friction,
+            'bullet.restitution': puck_restitution,
+            'bullet.linearDamping': puck_linear_damping,
+            'bullet.angularDamping': puck_angular_damping,
+            'bullet.customCollisionMarginEnabled': True,
+            'bullet.customCollisionMarginValue': 0.001
+        })
+        
+    apply_puck_physics(sim, puck)
 
+    return puck
+
+def create_top_camera(sim, table):
+    """
+    Creates and positions a top-down vision sensor above the hockey table.
+
+    Args:
+        sim: Simulation object.
+        table: Handle to the hockey table.
+
+    Returns:
+        int: Handle to the created camera.
+    """
     # Add a top-down perspective camera
     camera_handle = sim.createVisionSensor(
         2,  # options: bit 1 set for perspective mode
@@ -184,7 +248,6 @@ def setup_scene():
     )
 
     # Link the floating view to the camera
-    # Attach the camera to the floating view
     res = sim.adjustView(
         floating_view,  # Handle of the floating view
         camera_handle,  # Handle of the camera
@@ -198,26 +261,140 @@ def setup_scene():
     else:
         print("Failed to adjust the view.")
 
-    return sim, {
-        'camera': camera_handle,
-        'robot_left': robot_left,
-        'robot_right': robot_right,
-        'effector_left': effector_left,
-        'effector_right': effector_right,
-        'puck': puck
-    }
-    
-def get_robot_base_positions(table_length, table_width, robot_offset):
+def create_hockey_table(sim):
     """
-    Calculate the base positions of the robots relative to the center of the table.
+    Creates a hockey table simulation environment.
+
+    This function initializes a hockey table by first creating the table itself,
+    adding the necessary rails, and then creating the puck. The table, rails, 
+    and puck are added to the provided simulation object.
 
     Args:
-        table_length (float): Length of the table.
-        table_width (float): Width of the table.
-        robot_offset (float): Distance behind the goal where the robot base is positioned.
+        sim: The simulation object where the hockey table and its components
+             will be created and added.
 
     Returns:
-        dict: A dictionary containing the positions of the left and right robot bases.
+        A tuple containing the created table object, puck object, and camera object.
+    """
+    table = create_table(sim)
+    create_rails(sim, table)
+    puck = create_puck(sim)
+    camera = create_top_camera(sim, table)
+    return table, puck, camera
+
+#---------------------------------------------
+# Create robots and place them
+#---------------------------------------------
+
+def load_and_place_robot_pair(sim, attach_paddles=True):
+    """
+    Loads and places two robot arms symmetrically on either side of the table.
+
+    Args:
+        sim: CoppeliaSim simulation object.
+        attach_paddles (bool): If True, paddles will be attached to both end-effectors.
+
+    Returns:
+        tuple: Dictionary of handles:
+            - robot_left (int)
+            - robot_right (int)
+            - effector_left (int)
+            - effector_right (int)
+    """
+    def _load_robot_at(position, alias):
+        robot_model = f"{ROBOT_MODEL}.ttm"
+        robot_path = os.path.join(os.path.dirname(__file__), robot_model)
+        if not os.path.isfile(robot_path):
+            raise FileNotFoundError(f"[ERROR] Could not find {robot_model} at {robot_path}")
+        
+        handle = sim.loadModel(robot_path)
+        if handle == -1:
+            raise RuntimeError(f"[ERROR] Failed to load robot model: {robot_model}")
+        
+        sim.setObjectPosition(handle, -1, position)
+        sim.setObjectAlias(handle, alias)
+        return handle
+
+    # Define left and right robot positions
+    left_pos  = [-table_length / 2 - robot_offset, 0, robot_z]
+    right_pos = [ table_length / 2 + robot_offset, 0, robot_z]
+
+    # Load both robots
+    robot_left = _load_robot_at(left_pos, "RobotLeft")
+    robot_right = _load_robot_at(right_pos, "RobotRight")
+
+    # Get end effectors (assumes "link7_visible" as the end)
+    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/link7_visible")
+    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/link7_visible")
+
+    if attach_paddles:
+        attach_paddle(sim, eff_left, [0, 0, 1], "LeftPaddle")
+        attach_paddle(sim, eff_right, [0, 1, 0], "RightPaddle")
+
+    return {
+        'robot_left': robot_left,
+        'robot_right': robot_right,
+        'effector_left': eff_left,
+        'effector_right': eff_right
+    }
+
+
+def attach_paddle(sim, effector_handle, color, name):
+    """
+    Creates and attaches a paddle to the robot's end-effector.
+
+    Args:
+        sim: Simulation object.
+        effector_handle (int): Handle to the robot's end-effector.
+        color (list): RGB color values for the paddle.
+        name (str): Alias name for paddle.
+    """
+    paddle = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [0.1, 0.1, 0.01], 8)
+    sim.setShapeColor(paddle, None, sim.colorcomponent_ambient_diffuse, color)
+    sim.setObjectParent(paddle, effector_handle, False)
+    
+    sim.setObjectPosition(paddle, [-0.0275, 0, 0], sim.handle_parent)  # Slight offset to lie flat
+    sim.setObjectOrientation(paddle, [0, math.radians(90), 0], sim.handle_parent)
+    sim.setObjectAlias(paddle, name)
+
+
+def initialize_robot_joints(sim, robot, target_positions_deg):
+    """
+    Sets the robot joint configuration to desired angles using trajectory motion.
+
+    Args:
+        sim: Simulation object.
+        robot: Handle to robot.
+        target_positions_deg (list): Target joint angles in degrees.
+    """
+    num_joints = 6
+    robot_alias = sim.getObjectAlias(robot, 2)
+    joints = [sim.getObject(f'{robot_alias}/joint', {'index': i}) for i in range(num_joints)]
+    
+    sim.moveToConfig({
+        'joints': joints,
+        'targetPos': np.deg2rad(target_positions_deg).tolist(),
+        'maxVel': [np.deg2rad(180)] * num_joints,
+        'maxAccel': [np.deg2rad(40)] * num_joints,
+        'maxJerk': [np.deg2rad(80)] * num_joints
+    })
+
+def get_robot_left_position():
+    """
+    Calculate the base position of the left robot relative to the center of the table.
+
+    Returns:
+        list: A list containing the x, y position of the left robot base.
+    """
+    return [-table_length / 2 - 0.2, 0]  # 0.2 is the global robot_offset
+
+
+def get_robot_right_position():
+    """
+    Calculate the base position of the right robot relative to the center of the table.
+
+    Returns:
+        list: A list containing the x, y position of the right robot base.
     """
     # Left robot base position (behind the left goal)
     robot_left_pos = [-table_length / 2 - robot_offset, 0]  # (x, y)
@@ -225,15 +402,49 @@ def get_robot_base_positions(table_length, table_width, robot_offset):
     # Right robot base position (behind the right goal)
     robot_right_pos = [table_length / 2 + robot_offset, 0]  # (x, y)
 
-    return {
-        'robot_left': robot_left_pos,
-        'robot_right': robot_right_pos
+#---------------------------------------------
+# Setup the scene 
+#---------------------------------------------
+def setup_scene():
+    """
+    Sets up the complete simulation scene, including the table, puck, and robots.
+
+    Returns:
+        tuple: The sim object and dictionary of handles.
+    """
+    client = RemoteAPIClient()
+    sim = client.getObject('sim')
+    print('[INFO] Connected to CoppeliaSim')
+
+    sim.stopSimulation()
+    sim.startSimulation()
+    time.sleep(1)
+
+    table, puck, camera = create_hockey_table(sim)
+
+    robot_handles = load_and_place_robot_pair(sim, attach_paddles=True)
+
+    initialize_robot_joints(sim, robot_handles['robot_left'], [-90, 60, 45, -15, -90, 180])
+    initialize_robot_joints(sim, robot_handles['robot_right'], [90, 60, 45, -15, -90, 90])
+
+    handles = {\
+        'table': table,
+        'camera': camera,
+        'effector_left': robot_handles['effector_left'],
+        'effector_right': robot_handles['effector_right'],
+        'robot_left': robot_handles['robot_left'],
+        'robot_right': robot_handles['robot_right'],
+        'puck': puck
     }
+
+    return sim, handles
+#---------------------------------------------
 
 def main():
     sim, handles = setup_scene()
 
     print("[TEST] Scene setup complete.")
+    print("Table handle:", handles['table'])
     print("Camera handle:", handles['camera'])
     print("Effector (left) handle:", handles['effector_left'])
     print("Effector (right) handle:", handles['effector_right'])
