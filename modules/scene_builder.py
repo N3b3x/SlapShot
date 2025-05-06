@@ -260,6 +260,8 @@ def create_top_camera(sim, table):
         print("View successfully adjusted.")
     else:
         print("Failed to adjust the view.")
+        
+    return camera_handle
 
 def create_hockey_table(sim):
     """
