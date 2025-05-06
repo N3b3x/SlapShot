@@ -183,7 +183,7 @@ def create_puck(sim):
     if puck == -1:
         raise RuntimeError("[ERROR] Failed to create puck.")
     
-    sim.setObjectPosition(puck, [0, 0, table_top_z + puck_height], sim.handle_parent)
+    sim.setObjectPosition(puck, [0, 0, table_top_z + puck_height*2], sim.handle_parent)
     sim.setShapeColor(puck, None, sim.colorcomponent_ambient_diffuse, [1, 0, 0])
     sim.setObjectAlias(puck, "HockeyPuck")
     
@@ -286,16 +286,17 @@ def create_hockey_table(sim):
 # Create robots and place them
 #---------------------------------------------
 
-def load_and_place_robot_pair(sim, attach_paddles=True):
+def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts=True):
     """
     Loads and places two robot arms symmetrically on either side of the table.
 
     Args:
         sim: CoppeliaSim simulation object.
         attach_paddles (bool): If True, paddles will be attached to both end-effectors.
+        disable_scripts (bool): If True, removes child scripts from robots after loading.
 
     Returns:
-        tuple: Dictionary of handles:
+        dict: Dictionary of handles:
             - robot_left (int)
             - robot_right (int)
             - effector_left (int)
@@ -311,8 +312,17 @@ def load_and_place_robot_pair(sim, attach_paddles=True):
         if handle == -1:
             raise RuntimeError(f"[ERROR] Failed to load robot model: {robot_model}")
         
+        if disable_attached_scripts:
+            try:
+                script_handle = sim.getScript(sim.scripttype_childscript, handle)
+                sim.removeObjects([script_handle], False)
+                print(f"[INFO] Removed script from {alias}")
+            except Exception:
+                print(f"[WARN] No script found on {alias} to remove.")
+                
         sim.setObjectPosition(handle, -1, position)
         sim.setObjectAlias(handle, alias)
+
         return handle
 
     # Define left and right robot positions
@@ -439,9 +449,8 @@ def setup_scene():
     sim.startSimulation()
     time.sleep(1)
 
-    table, puck, camera = create_hockey_table(sim)
-
     robot_handles = load_and_place_robot_pair(sim, attach_paddles=True)
+    table, puck, camera = create_hockey_table(sim)
 
     initialize_robot_joints(sim, robot_handles['robot_left'], [-90, 60, 45, -15, -90, 180])
     initialize_robot_joints(sim, robot_handles['robot_right'], [90, 60, 45, -15, -90, 90])
