@@ -38,6 +38,7 @@ def setup_scene():
     # Create hockey table
     table = sim.createPrimitiveShape(sim.primitiveshape_cuboid, [table_length, table_width, table_height], 0)  # Use 0 for default options
     sim.setObjectPosition(table, [0, 0, z_height], sim.handle_parent)  # Set table position
+    sim.setObjectInt32Param(table, sim.shapeintparam_respondable, 1)
 
     # Side rails (top/bottom) - flush with table edge
     rail_data = [
@@ -63,10 +64,12 @@ def setup_scene():
         sim.setShapeColor(rail, None, sim.colorcomponent_ambient_diffuse, [0, 0, 0])  # Black color
         sim.setObjectParent(rail, table, True)  # Parent rail to table
         sim.setObjectPosition(rail, pos, sim.handle_parent)
+        # make the rails respondable but keep them static
+        sim.setObjectInt32Param(rail, sim.shapeintparam_respondable, 1)
 
     # Add red hockey puck
     #puck_z_position = table_top_z + puck_height / 2  # Position puck on top of the table
-    puck_z_position = table_top_z #+ (puck_height / 2)  # Ensure the puck sits right on top of the table
+    puck_z_position = table_top_z + 1.0*(puck_height)  # Ensure the puck sits right on top of the table
     puck = sim.createPrimitiveShape(sim.primitiveshape_cylinder, [puck_radius, puck_radius, puck_height], 8)  # Correct puck size
     sim.setObjectPosition(puck, [0, 0, puck_z_position], sim.handle_parent)  # Puck position
     sim.setShapeColor(puck, None, sim.colorcomponent_ambient_diffuse, [1, 0, 0])  # Red color
@@ -132,9 +135,14 @@ def setup_scene():
         sim.setObjectOrientation(paddle, [0, math.radians(90), 0], sim.handle_parent)
         # Set readable alias
         sim.setObjectAlias(paddle, name)
+        sim.setObjectInt32Param(puck, sim.shapeintparam_respondable, 1)
 
     attach_paddle(sim, effector_left, [0, 0, 1], "LeftPaddle")  # Blue paddle for left arm
     attach_paddle(sim, effector_right, [0, 1, 0], "RightPaddle")  # Green paddle for right arm
+
+
+    sim.setObjectInt32Param(puck, sim.shapeintparam_static, 0)
+    sim.setObjectInt32Param(puck, sim.shapeintparam_respondable, 1)
 
     robot_left_alias = sim.getObjectAlias(robot_left, 2)
     robot_right_alias = sim.getObjectAlias(robot_right, 2)
