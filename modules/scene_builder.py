@@ -137,22 +137,43 @@ def setup_scene():
     attach_paddle(sim, effector_left, [0, 0, 1], "LeftPaddle")  # Blue paddle for left arm
     attach_paddle(sim, effector_right, [0, 1, 0], "RightPaddle")  # Green paddle for right arm
 
-    # Add a top-down camera
-    camera = sim.createVisionSensor(
-        0,  # options: 0 for default settings (no additional options enabled)
-        [640, 480, 0, 0],  # intParams: sensor resolution 640x480, reserved params set to 0
-        [0.1, 10, 60, 0.7, 0, 0, 0, 0, 0, 0, 0]  # floatParams: near clipping plane, far clipping plane, FOV, sensor size, and null pixel settings
+    # Add a top-down perspective camera
+    camera_handle = sim.createVisionSensor(
+        2,  # options: bit 1 set for perspective mode
+        [640, 480, 0, 0],  # intParams: high resolution (1280x720), reserved params set to 0
+        [0.1, 10, 60, 0.03, 0, 0, 0, 0, 0, 0, 0]  # floatParams: near clipping, far clipping, FOV, sensor size, and null pixel settings
     )
-    sim.setObjectAlias(camera, "TopCamera")
+    sim.setObjectAlias(camera_handle, "TopCamera")
 
     # Position the camera above the scene
-    camera_position = [0, 0, 2]  # X, Y, Z position (2 meters above the center of the table)
-    camera_orientation = [0, math.radians(-90), 0]  # Rotate -90° around X-axis to look down
-    sim.setObjectPosition(camera, -1, camera_position)
-    sim.setObjectOrientation(camera, camera_orientation, -1)
+    camera_position = [0, 0, 0.5]  # X, Y, Z position (2 meters above the center of the table)
+    camera_orientation = [0, math.radians(-180), 0]  # Rotate -90° around X-axis to look straight down
+    sim.setObjectPosition(camera_handle, -1, camera_position)
+    sim.setObjectOrientation(camera_handle, camera_orientation, -1)
+
+    # Create a floating view for the camera
+    floating_view = sim.floatingViewAdd(
+        0.1, 0.1, 0.3, 0.3,  # Centered position and size
+        0  # Default options (close button enabled, resizable, etc.)
+    )
+
+    # Link the floating view to the camera
+    # Attach the camera to the floating view
+    res = sim.adjustView(
+        floating_view,  # Handle of the floating view
+        camera_handle,  # Handle of the camera
+        64,  # Option to remove the floating view at simulation end
+        "Top-Down Camera View"  # Label for the floating view
+    )
+
+    # Check if adjustment was successful
+    if res > 0:
+        print("View successfully adjusted.")
+    else:
+        print("Failed to adjust the view.")
 
     return sim, {
-        'camera': camera,
+        'camera': camera_handle,
         'robot_left': robot_left,
         'robot_right': robot_right,
         'effector_left': effector_left,
