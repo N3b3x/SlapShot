@@ -4,9 +4,26 @@ import time
 import os
 import math
 
-
 # User can select the robot model: "UR5" or "UR3"
 ROBOT_MODEL = "UR3"  # Change to "UR3" if needed
+
+
+# Define table dimensions and z height as variables
+table_length = 1.2
+table_width = 0.7
+table_height = 0.02
+z_height = 0.01  # Table's base height from the ground
+table_top_z = z_height + table_height  # Top of the table
+
+# Define additional parameters
+rail_thickness = 0.02
+rail_height = 0.05
+rail_z = table_height + (rail_height / 3)  # Place the bottom of the rail at the table's top surface
+puck_radius = 0.075
+puck_height = 0.02
+puck_mass = 0.17
+goal_width = 0.2  # Width of the goal opening
+robot_base_width = 0.15  # Physical width of the robot base
 
 def setup_scene():
     client = RemoteAPIClient()
@@ -18,24 +35,6 @@ def setup_scene():
     sim.startSimulation()
     time.sleep(1)
     
-    # Create hockey table
-    # Define table dimensions and z height as variables
-    table_length = 1.2
-    table_width = 0.7
-    table_height = 0.02
-    z_height = 0.01  # Table's base height from the ground
-    table_top_z = z_height + table_height  # Top of the table
-
-    # Define additional parameters
-    rail_thickness = 0.02
-    rail_height = 0.05
-    rail_z = table_height + (rail_height / 3)  # Place the bottom of the rail at the table's top surface
-    puck_radius = 0.075
-    puck_height = 0.02
-    puck_mass = 0.17
-    goal_width = 0.2  # Width of the goal opening
-    robot_base_width = 0.15  # Physical width of the robot base
-
     # Create hockey table
     table = sim.createPrimitiveShape(sim.primitiveshape_cuboid, [table_length, table_width, table_height], 0)  # Use 0 for default options
     sim.setObjectPosition(table, [0, 0, z_height], sim.handle_parent)  # Set table position
@@ -179,6 +178,29 @@ def setup_scene():
         'effector_left': effector_left,
         'effector_right': effector_right,
         'puck': puck
+    }
+    
+def get_robot_base_positions(table_length, table_width, robot_offset):
+    """
+    Calculate the base positions of the robots relative to the center of the table.
+
+    Args:
+        table_length (float): Length of the table.
+        table_width (float): Width of the table.
+        robot_offset (float): Distance behind the goal where the robot base is positioned.
+
+    Returns:
+        dict: A dictionary containing the positions of the left and right robot bases.
+    """
+    # Left robot base position (behind the left goal)
+    robot_left_pos = [-table_length / 2 - robot_offset, 0]  # (x, y)
+
+    # Right robot base position (behind the right goal)
+    robot_right_pos = [table_length / 2 + robot_offset, 0]  # (x, y)
+
+    return {
+        'robot_left': robot_left_pos,
+        'robot_right': robot_right_pos
     }
 
 def main():
