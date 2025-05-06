@@ -136,6 +136,33 @@ def setup_scene():
     attach_paddle(sim, effector_left, [0, 0, 1], "LeftPaddle")  # Blue paddle for left arm
     attach_paddle(sim, effector_right, [0, 1, 0], "RightPaddle")  # Green paddle for right arm
 
+    robot_left_alias = sim.getObjectAlias(robot_left, 2)
+    robot_right_alias = sim.getObjectAlias(robot_right, 2)
+
+    max_ang_vel = np.deg2rad(180)
+    max_ang_accel = np.deg2rad(40)
+    max_ang_jerk = np.deg2rad(80)
+    
+    #initialize joint positions
+    num_joints = 6
+    sim.moveToConfig({
+        'joints': [sim.getObject(f'{robot_left_alias}/joint', {'index': idx}) 
+                   for idx in range(num_joints)],
+        'maxVel': num_joints * [max_ang_vel],
+        'maxAccel': num_joints * [max_ang_accel],
+        'maxJerk': num_joints * [max_ang_jerk],
+        'targetPos': np.deg2rad([-90, 60, 45, -15, -90, 90]).tolist()
+    })
+
+    sim.moveToConfig({
+        'joints': [sim.getObject(f'{robot_right_alias}/joint', {'index': idx}) 
+                   for idx in range(num_joints)],
+        'maxVel': num_joints * [max_ang_vel],
+        'maxAccel': num_joints * [max_ang_accel],
+        'maxJerk': num_joints * [max_ang_jerk],
+        'targetPos': np.deg2rad([90, 60, 45, -15, -90, 90]).tolist()
+    })
+
     # Add a top-down perspective camera
     camera_handle = sim.createVisionSensor(
         2,  # options: bit 1 set for perspective mode
@@ -215,6 +242,10 @@ def main():
     print("Puck handle:", handles['puck'])
 
     input("[TEST] Press Enter to stop simulation...")
+    
+    # sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey.ttt')
+    # print(f'Saving sim to {sim_file}')
+    # sim.saveScene(sim_file)
     sim.stopSimulation()
 
 if __name__ == "__main__":
