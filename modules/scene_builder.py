@@ -25,6 +25,14 @@ puck_mass = 0.17
 goal_width = 0.2  # Width of the goal opening
 robot_base_width = 0.15  # Physical width of the robot base
 
+def init_joint_positions(sim, alias, joint_positions, num_joints=6):
+    joint_handles = [sim.getObject(f'{alias}/joint', {'index': idx}) 
+                   for idx in range(num_joints)]
+        # set up  left positions
+    for joint, angle in zip(joint_handles, joint_positions):
+        sim.setJointPosition(joint, angle)
+
+
 def setup_scene():
     client = RemoteAPIClient()
     sim = client.getObject('sim')
@@ -153,6 +161,9 @@ def setup_scene():
     
     #initialize joint positions
     num_joints = 6
+
+    # sim.startSimulation()
+    # time.sleep(1)
     sim.moveToConfig({
         'joints': [sim.getObject(f'{robot_left_alias}/joint', {'index': idx}) 
                    for idx in range(num_joints)],
@@ -249,12 +260,12 @@ def main():
     print("Robot right:", handles['robot_right'])
     print("Puck handle:", handles['puck'])
 
-    input("[TEST] Press Enter to stop simulation...")
+    # input("[TEST] Press Enter to stop simulation...")
     
-    # sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey.ttt')
-    # print(f'Saving sim to {sim_file}')
-    # sim.saveScene(sim_file)
+    sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey.ttt')
+    print(f'Saving sim to {sim_file}')
     sim.stopSimulation()
+    sim.saveScene(sim_file)
 
 if __name__ == "__main__":
     main()

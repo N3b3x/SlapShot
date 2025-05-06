@@ -7,9 +7,9 @@ from scipy.spatial.transform import Rotation
 def get_transform(a, alpha, d, theta):
     return sp.Matrix([
         [sp.cos(theta), -sp.sin(theta) * sp.cos(alpha), sp.sin(theta) * sp.sin(alpha), a * sp.cos(theta)],
-        [sp.sin(theta), sp.cos(theta) * sp.cos(alpha), -sp.cos(theta) * sp.sin(alpha), a * sp.sin(theta)],
-        [0, sp.sin(alpha), sp.cos(alpha), d],
-        [0, 0, 0, 1]
+        [sp.sin(theta),  sp.cos(theta) * sp.cos(alpha), -sp.cos(theta) * sp.sin(alpha), a * sp.sin(theta)],
+        [0,              sp.sin(alpha), sp.cos(alpha), d],
+        [0,              0, 0, 1]
     ])
 
 def get_forward_kinematics(dh_table):

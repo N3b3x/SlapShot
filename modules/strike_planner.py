@@ -11,7 +11,7 @@ class StrikePlanner:
         self.table_width = 0.7
         self.table_length = 1.2 # x direction
         self.puck_radius = 0.075
-        self.defense_line = 0.2
+        self.defense_line = 0.3
         self.num_joints = num_joints
 
         self.ik_solver = Ur3Solver()
@@ -79,7 +79,8 @@ class StrikePlanner:
 
         if joint_angles is None:
             print(f'No solution found for target pos:\n{target_pos}\n{target_orientation}')
-        
+        else:
+            print(*joint_angles)
         return joint_angles
         
 
