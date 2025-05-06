@@ -465,12 +465,6 @@ def setup_scene():
         'puck': puck
     }
 
-    return sim, handles
-#---------------------------------------------
-
-def main():
-    sim, handles = setup_scene()
-
     print("[TEST] Scene setup complete.")
     print("Table handle:", handles['table'])
     print("Camera handle:", handles['camera'])
@@ -480,12 +474,20 @@ def main():
     print("Robot right:", handles['robot_right'])
     print("Puck handle:", handles['puck'])
 
+    return sim, handles
+#---------------------------------------------
+
+def main(sim_file=None):
+    sim, handles = setup_scene()
+    
     input("[TEST] Press Enter to stop simulation...")
     
-    # sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey.ttt')
-    # print(f'Saving sim to {sim_file}')
-    # sim.saveScene(sim_file)
+    if sim_file:
+        print(f'Saving sim to {sim_file}')
+        sim.saveScene(sim_file)
     sim.stopSimulation()
 
 if __name__ == "__main__":
-    main()
+    sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey.ttt')  # Example default file path
+    main(sim_file=sim_file)
+
