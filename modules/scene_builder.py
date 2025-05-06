@@ -367,17 +367,36 @@ def initialize_robot_joints(sim, robot, target_positions_deg):
         robot: Handle to robot.
         target_positions_deg (list): Target joint angles in degrees.
     """
+    print(f"[DEBUG] Initializing robot joints for robot handle: {robot}")
+    print(f"[DEBUG] Target joint positions (degrees): {target_positions_deg}")
+
     num_joints = 6
     robot_alias = sim.getObjectAlias(robot, 2)
-    joints = [sim.getObject(f'{robot_alias}/joint', {'index': i}) for i in range(num_joints)]
-    
-    sim.moveToConfig({
-        'joints': joints,
-        'targetPos': np.deg2rad(target_positions_deg).tolist(),
-        'maxVel': [np.deg2rad(180)] * num_joints,
-        'maxAccel': [np.deg2rad(40)] * num_joints,
-        'maxJerk': [np.deg2rad(80)] * num_joints
-    })
+    print(f"[DEBUG] Robot alias: {robot_alias}")
+
+    joints = []
+    for i in range(num_joints):
+        joint_handle = sim.getObject(f'{robot_alias}/joint', {'index': i})
+        if joint_handle == -1:
+            print(f"[ERROR] Failed to get handle for joint {i} of robot {robot_alias}")
+        else:
+            print(f"[DEBUG] Joint {i} handle: {joint_handle}")
+        joints.append(joint_handle)
+
+    target_positions_rad = np.deg2rad(target_positions_deg).tolist()
+    print(f"[DEBUG] Target joint positions (radians): {target_positions_rad}")
+
+    try:
+        sim.moveToConfig({
+            'joints': joints,
+            'targetPos': target_positions_rad,
+            'maxVel': [np.deg2rad(180)] * num_joints,
+            'maxAccel': [np.deg2rad(40)] * num_joints,
+            'maxJerk': [np.deg2rad(80)] * num_joints
+        })
+        print("[DEBUG] moveToConfig executed successfully.")
+    except Exception as e:
+        print(f"[ERROR] Failed to move robot joints: {e}")
 
 def get_robot_left_position():
     """
