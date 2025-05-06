@@ -23,16 +23,19 @@ def main():
 
     try:
         while True:
-            if ENABLE_PUCK_TRACKER:
-                try:
-                    pos = tracker.get_puck_position()
-                    if pos is not None and prev_pos is not None and ENABLE_STRIKE_PLANNER:
-                        strike_point, strike_vel = striker.plan_strike(prev_pos, pos)
-                        if strike_point:
-                            striker.execute_strike(strike_point, strike_vel)
-                    prev_pos = pos
-                except Exception as e:
-                    print(f"[ERROR] Puck tracking failed: {e}")
+            # pos = tracker.get_puck_position()
+            # if pos and prev_pos:
+            #     strike_point, strike_vel = striker.plan_strike(prev_pos, pos)
+            #     if strike_point:
+            #         striker.execute_strike(strike_point, strike_vel)
+            # prev_pos = pos
+
+            puck_pos, puck_vel = striker.extract_data_from_sim(handles['puck'])
+            joint_angles = striker.plan_strike(puck_pos, puck_vel)
+
+            if joint_angles is not None:
+                striker.execute_strike(joint_angles)
+
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("\n[INFO] Stopping simulation...")

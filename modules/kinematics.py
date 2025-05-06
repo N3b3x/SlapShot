@@ -1,13 +1,36 @@
 import numpy as np
 import sympy as sp
-from sympy import symbols
-from dh_tables import ur3_dh_table
+from sympy import symbols, lambdify
+from modules.dh_tables import ur3_dh_table, q_syms
 from scipy.spatial.transform import Rotation
+
+def get_transform(a, alpha, d, theta):
+    return sp.Matrix([
+        [sp.cos(theta), -sp.sin(theta) * sp.cos(alpha), sp.sin(theta) * sp.sin(alpha), a * sp.cos(theta)],
+        [sp.sin(theta), sp.cos(theta) * sp.cos(alpha), -sp.cos(theta) * sp.sin(alpha), a * sp.sin(theta)],
+        [0, sp.sin(alpha), sp.cos(alpha), d],
+        [0, 0, 0, 1]
+    ])
+
+def get_forward_kinematics(dh_table):
+
+    T = sp.eye(4)
+    transforms = [T]
+    for link in dh_table:
+        T = T * get_transform(link['a'], link['alpha'], link['d'], link['theta'])
+        transforms.append(T)
+    
+    return transforms
 
 class Ur3Solver:
     def __init__(self):
         
         self.dh_table = ur3_dh_table
+        self.transforms = get_forward_kinematics(self.dh_table)
+        T_30 = self.transforms[3]
+        R_30_sym = T_30[:3, :3]
+
+        self.R_30_func = lambdify(q_syms[:3], R_30_sym, modules='numpy')
 
     def perform_position_ik(self, X_ee, R_ee):
         
@@ -37,9 +60,9 @@ class Ur3Solver:
         return sol
         
 
-    def perform_orientation_ik(self, X_ee, R_ee, q1):
-        
-        R_30 = Rotation.from_euler('Z', q1).as_matrix()
+    def perform_orientation_ik(self, X_ee, R_ee, q1, q2, q3):
+               
+        R_30 = self.R_30_func(q1, q2, q3)
         R_63 = R_30.T @ R_ee
         R_63 = Rotation.from_matrix(R_63)
         [q4, q5, q6] = R_63.as_euler('ZYZ')
@@ -52,7 +75,7 @@ class Ur3Solver:
         if sol is None:
             return None
         q1, q2, q3 = self.perform_position_ik(X_ee, R_ee)
-        q4, q5, q6 = self.perform_orientation_ik(X_ee, R_ee, q1)
+        q4, q5, q6 = self.perform_orientation_ik(X_ee, R_ee, q1, q2, q3)
         
         return q1, q2, q3, q4, q5, q6
         
