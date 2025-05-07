@@ -641,6 +641,11 @@ def attach_paddle(sim, effector_handle, color, name):
     sim.setObjectPosition(paddle, [-0.0275, 0, 0], sim.handle_parent)  # Slight offset to lie flat
     sim.setObjectOrientation(paddle, [0, -math.radians(90), 0], sim.handle_parent)
     sim.setObjectAlias(paddle, name)
+    
+    apply_physics_properties(sim, paddle, {
+        'dynamic': False,  # Paddles are typically static since they are controlled by the robot
+        'respondable': True
+    })
 
 #---------------------------------------------
 # Function to initialize robot joints
