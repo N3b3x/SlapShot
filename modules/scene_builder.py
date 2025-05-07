@@ -60,8 +60,8 @@ z_height = 0.01     # Height of the table's base from the ground in meters
 table_top_z = z_height + table_height  # Height of the table's top surface from the ground
 
 # Define table physical properties
-table_friction = 0.01       # Friction coefficient for the table surface
-table_restitution = 0.6     # Coefficient of restitution (bounciness) for the table surface
+table_friction = 0.001       # Friction coefficient for the table surface
+table_restitution = 0.8     # Coefficient of restitution (bounciness) for the table surface
 
 # Define additional parameters
 rail_thickness = 0.02                       # Thickness of the table's side rails in meters
@@ -82,10 +82,10 @@ puck_inertia_x, puck_inertia_y, puck_inertia_z = calculate_puck_inertia(puck_mas
 
 # Puck physical properties
 puck_restitution = 0.8          # Coefficient of restitution (bounciness) for the puck
-puck_friction = 0.02            # Friction coefficient for the puck's interaction with the table
+puck_friction = 0.002            # Friction coefficient for the puck's interaction with the table
 puck_rolling_friction = 0.0005  # Rolling friction coefficient for the puck
-puck_linear_damping = 0.005     # Linear damping to reduce puck's velocity over time
-puck_angular_damping = 0.005    # Angular damping to reduce puck's spin over time
+puck_linear_damping = 0.00     # Linear damping to reduce puck's velocity over time
+puck_angular_damping = 0.00    # Angular damping to reduce puck's spin over time
 
 #---------------------------------------------
 # ROBOT PLACEMENT PROPERTIES
@@ -247,8 +247,11 @@ def create_table(sim):
     apply_physics_properties(sim, table, {
             'respondable': True,
             'dynamic': False,
+            'dynamic': False,
+            'applyShowEdges': True,
             'bullet.friction': table_friction,
-            'bullet.restitution': table_restitution
+            'bullet.frictionOld': table_friction,
+            'bullet.stickyContact': False
         })
     
     return table
@@ -326,11 +329,13 @@ def create_puck(sim):
         'dynamic': True,
         'respondable': True,
         'bullet.friction': puck_friction,
+        'bullet.frictionOld': puck_friction,
+        'bullet.stickyContact': False,
         'bullet.restitution': puck_restitution,
         'bullet.linearDamping': puck_linear_damping,
         'bullet.angularDamping': puck_angular_damping,
-        'bullet.customCollisionMarginEnabled': True,
-        'bullet.customCollisionMarginValue': 0.001
+        # 'bullet.customCollisionMarginEnabled': True,
+        # 'bullet.customCollisionMarginValue': 0.001,
     })
 
     return puck
