@@ -15,10 +15,10 @@ ur5_dh_table = [
 ]
 
 ur3_dh_table = [
-    {'theta':q_syms[0], 'a':0, 'd':0.1519, 'alpha':sp.pi/2},
-    {'theta':q_syms[1], 'a':-0.24365, 'd':0, 'alpha':0},
-    {'theta':q_syms[2], 'a':-0.21325, 'd':0, 'alpha':0},
-    {'theta':q_syms[3], 'a':0, 'd':0.11235, 'alpha':sp.pi/2},
-    {'theta':q_syms[4], 'a':0, 'd':0.08535, 'alpha':-sp.pi/2},
-    {'theta':q_syms[5], 'a':0, 'd':0.0819, 'alpha':0},
+    {'theta':q_syms[0], 'a':0, 'd':0.1519, 'alpha':0},
+    {'theta':0, 'a':-0.24365, 'd':0, 'alpha':-q_syms[1]},
+    {'theta':0, 'a':-0.21325, 'd':0, 'alpha':-q_syms[2]},
+    {'theta':0, 'a':0, 'd':0.11235, 'alpha':-q_syms[3]},
+    {'theta':q_syms[4], 'a':0, 'd':0.08535, 'alpha':0},
+    {'theta':0, 'a':0, 'd':0.0819, 'alpha':-q_syms[5]},
 ]
