@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import threading
 import time
+from modules.game_referee import GameReferee
 
 class PuckTracker:
     """
@@ -17,13 +18,14 @@ class PuckTracker:
     # ==========================
     # Initialization
     # ==========================
-    def __init__(self, sim, camera_handle):
+    def __init__(self, sim, camera_handle, goal_width):
         """
         Initialize the PuckTracker.
 
         Args:
             sim: The simulation object for interacting with the environment.
             camera_handle: The handle to the vision sensor in the simulation.
+            goal_width: The width of the goal opening.
         """
         self.sim = sim
         self.camera = camera_handle
@@ -35,6 +37,58 @@ class PuckTracker:
         self.lock = threading.Lock()  # Lock for thread-safe access to the camera
         self.thread = threading.Thread(target=self._display_canvas, daemon=True)
         self.thread.start()  # Start the display thread
+        self.referee = None  # GameReferee will be initialized after bounds are extracted
+        self.goal_width = goal_width
+
+        # Initialize bounds as None; they will be dynamically extracted
+        self.outer_bounds = None
+        self.inner_bounds = None
+
+    def extract_court_bounds(self):
+        """
+        Dynamically extract the court bounds from the camera feed.
+
+        Returns:
+            tuple: (outer_bounds, inner_bounds) in pixel coordinates.
+        """
+        img = self._get_image()
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+
+        # Black mask for detecting the play area
+        black_lower = (0, 0, 0)
+        black_upper = (5, 5, 5)
+        black_mask = cv2.inRange(img_hsv, black_lower, black_upper)
+
+        # Extract bounds
+        self.outer_bounds, self.inner_bounds = self._extract_play_area_bounds(black_mask, rail_offset=(18, 18, 25, 25))
+
+        # Convert bounds to meters
+        if self.outer_bounds and self.inner_bounds:
+            self.outer_bounds = tuple(coord * self.pixel_to_meter for coord in self.outer_bounds)
+            self.inner_bounds = tuple(coord * self.pixel_to_meter for coord in self.inner_bounds)
+
+            # Initialize the referee with the extracted bounds
+            self.referee = GameReferee({"outer": self.outer_bounds, "inner": self.inner_bounds}, self.goal_width)
+
+    def get_court_bounds(self):
+        """
+        Get the court bounds.
+
+        Returns:
+            dict: A dictionary containing the outer and inner bounds of the court.
+        """
+        if self.outer_bounds is None or self.inner_bounds is None:
+            self.extract_court_bounds()
+        return {"outer": self.outer_bounds, "inner": self.inner_bounds}
+
+    def get_goal_width(self):
+        """
+        Get the goal width.
+
+        Returns:
+            float: The width of the goal opening.
+        """
+        return self.goal_width
 
     # ==========================
     # Image Retrieval
@@ -168,7 +222,7 @@ class PuckTracker:
     # ==========================
     def _display_canvas(self):
         """
-        Continuously display the vision sensor feed with overlays for puck position, velocity, and mask image.
+        Continuously display the vision sensor feed with overlays for puck position, velocity, and game state.
         """
         while self.running:
             img = self._get_image()
@@ -240,6 +294,14 @@ class PuckTracker:
             # Get the puck position and velocity
             puck_pos = self.get_puck_position()
             puck_velocity = self.get_puck_velocity()
+
+            # Check for goals and update scores
+            goal_side = self.referee.check_goal(puck_pos)
+            if goal_side:
+                print(f"[INFO] Goal scored on the {goal_side} side!")
+
+            # Overlay game state
+            self.referee.display_game_state(img_rgb)
 
             # Overlay puck position
             if puck_pos is not None:

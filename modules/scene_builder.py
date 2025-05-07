@@ -3,55 +3,110 @@ import numpy as np
 import time
 import os
 import math
+import random
 
-# User can select the robot model: "UR5" or "UR3"
-ROBOT_MODEL = "UR3"  # Change to "UR3" if needed
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #   BASIC HELPERS AND CONSTANTS
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
 
-# Define table dimensions and z height as variables
-table_length = 1.2
-table_width = 0.7
-table_height = 0.02
-z_height = 0.01  # Table's base height from the ground
-table_top_z = z_height + table_height  # Top of the table
+#---------------------------------------------
+# Calculate inertia for a solid cylinder
+#---------------------------------------------
+def calculate_puck_inertia(mass, radius, height):
+    """
+    Calculate the inertia for a solid cylinder (puck).
+
+    Args:
+        mass (float): Mass of the puck.
+        radius (float): Radius of the puck.
+        height (float): Height of the puck.
+
+    Returns:
+        tuple: Inertia values (Ixx, Iyy, Izz).
+    """
+    inertia_z = 0.5 * mass * radius**2  # Rotational inertia around the puck's vertical axis
+    inertia_x = inertia_y = (1/12) * mass * (3 * radius**2 + height**2)  # Rotational inertia around horizontal axes
+    return inertia_x, inertia_y, inertia_z
+
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #   CONSTANTS AND PARAMETERS FOR THE AIR HOCKEY TABLE SCENE
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#---------------------------------------------
+# ROBOT MODEL
+#---------------------------------------------
+ROBOT_MODEL = "UR3"  # Robot model being used. 
+                     # Can select the robot model: "UR5" or "UR3"
+
+#---------------------------------------------
+# TABLE DIMENSIONS AND PROPERTIES
+#---------------------------------------------
+table_length = 1.2  # Length of the air hockey table in meters
+table_width = 0.7   # Width of the air hockey table in meters
+table_height = 0.02 # Thickness of the table in meters
+z_height = 0.01     # Height of the table's base from the ground in meters
+table_top_z = z_height + table_height  # Height of the table's top surface from the ground
 
 # Define table physical properties
-table_friction = 0.01  # Friction coefficient for the table
-table_restitution = 0.6  # Coefficient of restitution for the table
+table_friction = 0.01       # Friction coefficient for the table surface
+table_restitution = 0.6     # Coefficient of restitution (bounciness) for the table surface
 
 # Define additional parameters
-rail_thickness = 0.02
-rail_height = 0.05
-rail_z = table_height + (rail_height / 3)  # Place the bottom of the rail at the table's top surface
-
-# Define puck parameters
-puck_radius = 0.075
-puck_height = 0.02
-puck_mass = 0.17
-
-# Calculate inertia for a solid cylinder
-puck_inertia_z = 0.5 * puck_mass * puck_radius**2  # Inertia around the cylinder's axis
-puck_inertia_x = puck_inertia_y = (1/12) * puck_mass * (3 * puck_radius**2 + puck_height**2)  # Inertia around x and y axes
-
-# Puck physical properties
-puck_restitution = 0.8   # Coefficient of restitution for the puck
-puck_friction = 0.02      # Friction coefficient
-puck_rolling_friction = 0.0005   # Static friction coefficient
-puck_linear_damping = 0.005  # Linear damping for the puck
-puck_angular_damping = 0.005  # Angular damping for the puck
+rail_thickness = 0.02                       # Thickness of the table's side rails in meters
+rail_height = 0.05                          # Height of the table's side rails in meters
+rail_z = table_height + (rail_height / 3)   # Z-position of the rail's bottom, slightly above the table's top
 
 # Define goal parameters
-goal_width = 0.2  # Width of the goal opening
-
-# Define robot parameters
-robot_base_width = 0.15  # Physical width of the robot base
-robot_z = table_top_z  # On table
-robot_offset = 0.2  # Distance behind the goal
-
+goal_width = 0.2  # Width of the goal opening in meters
 
 #---------------------------------------------
-# Helpers
+# PUCK DIMENSIONS AND PROPERTIES
 #---------------------------------------------
+puck_radius = 0.075         # Radius of the puck in meters
+puck_height = 0.02          # Height (thickness) of the puck in meters
+puck_mass = 0.17            # Mass of the puck in kilograms
 
+puck_inertia_x, puck_inertia_y, puck_inertia_z = calculate_puck_inertia(puck_mass, puck_radius, puck_height)
+
+# Puck physical properties
+puck_restitution = 0.8          # Coefficient of restitution (bounciness) for the puck
+puck_friction = 0.02            # Friction coefficient for the puck's interaction with the table
+puck_rolling_friction = 0.0005  # Rolling friction coefficient for the puck
+puck_linear_damping = 0.005     # Linear damping to reduce puck's velocity over time
+puck_angular_damping = 0.005    # Angular damping to reduce puck's spin over time
+
+#---------------------------------------------
+# ROBOT PLACEMENT PROPERTIES
+#---------------------------------------------
+robot_base_width = 0.15  # Width of the robot's base in meters
+robot_z = table_top_z    # Z-position of the robot's base, aligned with the table's top surface
+robot_offset = 0.2       # Distance of the robot's base from the goal in meters
+
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #   SIM HELPERS AND PHYSICS PROPERTIES APPLIER
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#---------------------------------------------
+# Object Mass and Inertia Helpers
+#---------------------------------------------
 def set_mass_and_inertia(sim, shape, mass, inertia_diag):
     """
     Sets mass and simplified diagonal inertia for a given shape.
@@ -80,6 +135,9 @@ def set_mass_and_inertia(sim, shape, mass, inertia_diag):
 
     sim.setShapeInertia(shape, inertia_matrix, transformation_matrix)
 
+#---------------------------------------------
+# Physics Properties Applier
+#---------------------------------------------
 def apply_physics_properties(sim, handle, properties: dict):
     """
     Apply Bullet physics and common properties to a shape.
@@ -99,8 +157,75 @@ def apply_physics_properties(sim, handle, properties: dict):
         elif isinstance(v, list):
             sim.setVector3Property(handle, k, v)
 
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #               CREATE AIR HOCKEY TABLE 
+            #             (table, rails, puck, camera)
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
 #---------------------------------------------
-# Create the table, rails, and puck  
+# Complete hockey table creator
+#---------------------------------------------
+def create_hockey_table(sim):
+    """
+    Creates a hockey table simulation environment.
+
+    This function initializes a hockey table by first creating the table itself,
+    adding the necessary rails, and then creating the puck. The table, rails, 
+    and puck are added to the provided simulation object.
+
+    Args:
+        sim: The simulation object where the hockey table and its components
+             will be created and added.
+
+    Returns:
+        A tuple containing the created table object, puck object, camera object, and goal sections.
+    """
+    table = create_table(sim)
+    create_rails(sim, table)
+    puck = create_puck(sim)
+    camera = create_top_camera(sim, table)
+    goal_sections = create_goal_sections(sim, table)
+    return table, puck, camera, goal_sections
+
+#---------------------------------------------
+# Random puck positioning initializer
+#---------------------------------------------
+def initialize_puck_randomly(sim, puck):
+    """
+    Initializes the puck randomly in either the left or right player's alley, closer to their goals.
+
+    Args:
+        sim: The simulation object.
+        puck: The handle of the puck object.
+    """
+    # Define the x-coordinate range for left and right alleys
+    left_x_range = (-table_length / 2 + 0.1, -table_length / 2 + 0.3)
+    right_x_range = (table_length / 2 - 0.3, table_length / 2 - 0.1)
+
+    # Define the y-coordinate range for the puck's position
+    y_range = (-goal_width / 2 + 0.05, goal_width / 2 - 0.05)
+
+    # Randomly choose left or right alley
+    if random.choice(["left", "right"]) == "left":
+        x_pos = random.uniform(*left_x_range)
+    else:
+        x_pos = random.uniform(*right_x_range)
+
+    # Randomly choose a y-coordinate within the range
+    y_pos = random.uniform(*y_range)
+
+    # Set the puck's position
+    sim.setObjectPosition(puck, sim.handle_parent, [x_pos, y_pos, table_top_z + puck_height / 2])
+    print(f"[INFO] Puck initialized at position: ({x_pos:.2f}, {y_pos:.2f}, {table_top_z + puck_height / 2:.2f})")
+
+#---------------------------------------------
+# Table Base Creator
 #---------------------------------------------
 def create_table(sim):
     """
@@ -128,6 +253,9 @@ def create_table(sim):
     
     return table
 
+#---------------------------------------------
+# Table Rails Creator
+#---------------------------------------------
 def create_rails(sim, table):
     """
     Creates all side and goal rails around the table.
@@ -168,7 +296,9 @@ def create_rails(sim, table):
     for size, pos in rail_specs:
         _add_rail(size, pos)
         
-
+#---------------------------------------------
+# Air Hockey Puck Creator
+#---------------------------------------------
 def create_puck(sim):
     """
     Creates and returns a dynamic hockey puck with realistic physical properties.
@@ -183,39 +313,31 @@ def create_puck(sim):
     if puck == -1:
         raise RuntimeError("[ERROR] Failed to create puck.")
     
-    sim.setObjectPosition(puck, [0, 0, table_top_z + puck_height*2], sim.handle_parent)
+    # Set puck position above the table
+    sim.setObjectPosition(puck, sim.handle_parent, [0, 0, table_top_z + puck_height / 2])
     sim.setShapeColor(puck, None, sim.colorcomponent_ambient_diffuse, [1, 0, 0])
     sim.setObjectAlias(puck, "HockeyPuck")
     
-    def apply_puck_physics(sim, puck_handle):
-        inertia = [
-            puck_inertia_x,
-            puck_inertia_y,
-            puck_inertia_z
-        ]
-        inertia_matrix = [
-            inertia[0], 0, 0,
-            0, inertia[1], 0,
-            0, 0, inertia[2]
-        ]
-        sim.setShapeMass(puck_handle, puck_mass)
-        sim.setShapeInertia(puck_handle, inertia_matrix, [1,0,0,0, 0,1,0,0, 0,0,1,0])  # COM at origin
+    # Set puck mass and inertia
+    set_mass_and_inertia(sim, puck, puck_mass, [puck_inertia_x, puck_inertia_y, puck_inertia_z])
 
-        apply_physics_properties(sim, puck_handle, {
-            'dynamic': True,
-            'respondable': True,
-            'bullet.friction': puck_friction,
-            'bullet.restitution': puck_restitution,
-            'bullet.linearDamping': puck_linear_damping,
-            'bullet.angularDamping': puck_angular_damping,
-            'bullet.customCollisionMarginEnabled': True,
-            'bullet.customCollisionMarginValue': 0.001
-        })
-        
-    apply_puck_physics(sim, puck)
+    # Apply physics properties
+    apply_physics_properties(sim, puck, {
+        'dynamic': True,
+        'respondable': True,
+        'bullet.friction': puck_friction,
+        'bullet.restitution': puck_restitution,
+        'bullet.linearDamping': puck_linear_damping,
+        'bullet.angularDamping': puck_angular_damping,
+        'bullet.customCollisionMarginEnabled': True,
+        'bullet.customCollisionMarginValue': 0.001
+    })
 
     return puck
 
+#------------------------------------------------
+# Top Camera - board visualization - Creator
+#------------------------------------------------
 def create_top_camera(sim, table):
     """
     Creates and positions a top-down vision sensor above the hockey table.
@@ -263,34 +385,178 @@ def create_top_camera(sim, table):
         
     return camera_handle
 
-def create_hockey_table(sim):
+#---------------------------------------------
+# Goal Sections - with goal sensor - Creator
+#---------------------------------------------
+def create_goal_sections(sim, table):
     """
-    Creates a hockey table simulation environment.
-
-    This function initializes a hockey table by first creating the table itself,
-    adding the necessary rails, and then creating the puck. The table, rails, 
-    and puck are added to the provided simulation object.
+    Creates goal sections behind the goal openings with a base and yellow rail edges.
+    Ensures the right goal's exterior aligns correctly with the interior.
+    Uses ray-type proximity sensors to detect if a puck breaks the goal line.
 
     Args:
-        sim: The simulation object where the hockey table and its components
-             will be created and added.
+        sim: The simulation object.
+        table: The handle of the hockey table.
 
     Returns:
-        A tuple containing the created table object, puck object, and camera object.
+        dict: A dictionary containing the handles of the goal sections and sensors:
+            - left_goal_base
+            - right_goal_base
+            - left_goal_rails
+            - right_goal_rails
+            - left_goal_sensor
+            - right_goal_sensor
     """
-    table = create_table(sim)
-    create_rails(sim, table)
-    puck = create_puck(sim)
-    camera = create_top_camera(sim, table)
-    return table, puck, camera
+    goal_depth = 0.2  # Depth of the goal section
+    goal_height = table_height + 0.05  # Height of the goal section
+    goal_z = z_height + goal_height / 2  # Center of the goal section in the Z-axis
+    goal_extension_factor = 0.4  # Extend only 40% of the way to the robots
+    sensor_offset = 0.025  # Offset to position the sensors deeper into the goals
+
+    def _create_goal_base(position, alias):
+        # Create the goal base as a cuboid
+        goal_base = sim.createPrimitiveShape(sim.primitiveshape_cuboid, [goal_depth * goal_extension_factor, goal_width, table_height], 0)
+        if goal_base == -1:
+            raise RuntimeError(f"[ERROR] Failed to create goal base: {alias}")
+        sim.setObjectPosition(goal_base, position, sim.handle_parent)
+        sim.setObjectAlias(goal_base, alias)
+        sim.setShapeColor(goal_base, None, sim.colorcomponent_ambient_diffuse, [0.5, 0.5, 0.5])  # Gray color
+        sim.setObjectParent(goal_base, table, True)
+
+        apply_physics_properties(sim, goal_base, {
+            'respondable': True,
+            'dynamic': False,
+            'bullet.friction': 0.01,
+            'bullet.restitution': 0.6
+        })
+        return goal_base
+
+    def _create_goal_rails(position, alias, side=0):
+        """
+        Create the goal rails as cuboids.
+
+        Args:
+            position (list): Position of the goal base.
+            alias (str): Alias for the goal rails.
+            side (int): 0 for left, 1 for right.
+
+        Returns:
+            list: Handles of the created goal rails.
+        """
+        rail_thickness = 0.02
+        rail_height = 0.05
+        offset = -goal_depth * goal_extension_factor / 2 if side == 0 else goal_depth * goal_extension_factor / 2
+        rail_specs = [
+            ([rail_thickness, goal_width, rail_height], [position[0] + offset, position[1], goal_z]),
+            ([goal_depth * goal_extension_factor, rail_thickness, rail_height], [position[0], position[1] + goal_width / 2, goal_z]),
+            ([goal_depth * goal_extension_factor, rail_thickness, rail_height], [position[0], position[1] - goal_width / 2, goal_z])
+        ]
+
+        rails = []
+        for size, pos in rail_specs:
+            rail = sim.createPrimitiveShape(sim.primitiveshape_cuboid, size, 0)
+            if rail == -1:
+                raise RuntimeError(f"[ERROR] Failed to create goal rail at {pos}")
+            sim.setObjectPosition(rail, pos, sim.handle_parent)
+            sim.setShapeColor(rail, None, sim.colorcomponent_ambient_diffuse, [1, 1, 0])  # Yellow color
+            sim.setObjectParent(rail, table, True)
+
+            apply_physics_properties(sim, rail, {
+                'respondable': True,
+                'dynamic': False,
+                'bullet.friction': 0.01,
+                'bullet.restitution': 0.01
+            })
+            rails.append(rail)
+        return rails
+
+    def _create_goal_sensor(start_position, end_position, alias):
+        # Define proximity sensor parameters for a ray-type sensor
+        sensor_type = sim.proximitysensor_ray_subtype
+        sub_type = 16  # Deprecated, set to 16
+        options = 1  # Explicitly handled
+        int_params = [0, 0, 0, 0, 0, 0, 0, 0]  # Not used for ray-type sensors
+        float_params = [
+            0.0,  # Offset
+            np.linalg.norm(np.array(end_position) - np.array(start_position)),  # Range (distance between start and end)
+            0.0,  # X size (not used for ray-type sensors)
+            0.0,  # Y size (not used for ray-type sensors)
+            0.0,  # X size far (not used for ray-type sensors)
+            0.0,  # Y size far (not used for ray-type sensors)
+            0.0,  # Inside gap
+            0.0,  # Radius (not used for ray-type sensors)
+            0.0,  # Radius far (not used for ray-type sensors)
+            0.0,  # Angle (not used for ray-type sensors)
+            0.0,  # Threshold angle for limited angle detection
+            0.0,  # Smallest detection distance
+            0.01,  # Sensing point size
+            0.0,  # Reserved
+            0.0   # Reserved
+        ]
+
+        # Create the proximity sensor
+        sensor = sim.createProximitySensor(sensor_type, sub_type, options, int_params, float_params)
+        if sensor == -1:
+            raise RuntimeError(f"[ERROR] Failed to create proximity sensor: {alias}")
+        sim.setObjectPosition(sensor, start_position, sim.handle_parent)
+        sim.setObjectAlias(sensor, alias)
+        sim.setObjectParent(sensor, table, True)
+
+        # Orient the sensor to point from start_position to end_position using Euler angles
+        direction = np.array(end_position) - np.array(start_position)
+        direction = direction / np.linalg.norm(direction)  # Normalize the direction vector
+        angle_x = -math.atan2(direction[1], direction[0])  # Pitch (horizontal orientation)
+        angle_y = -math.atan2(direction[2], math.sqrt(direction[0]**2 + direction[1]**2))  # Roll
+        angle_z = 0  # Yaw
+        sim.setObjectOrientation(sensor, [angle_x, angle_y, angle_z], sim.handle_parent)
+
+        return sensor
+
+    # Create left goal base, rails, and sensor
+    left_goal_base = _create_goal_base([-table_length / 2 - goal_depth * goal_extension_factor / 2, 0, z_height], "LeftGoalBase")
+    left_goal_rails = _create_goal_rails([-table_length / 2 - goal_depth * goal_extension_factor / 2, 0, z_height], "LeftGoalRails", 0)
+    left_goal_sensor = _create_goal_sensor(
+        [-table_length / 2 - sensor_offset, -goal_width / 2, table_top_z + puck_height / 2],
+        [-table_length / 2 - sensor_offset, goal_width / 2, table_top_z + puck_height / 2],
+        "LeftGoalSensor"
+    )
+
+    # Create right goal base, rails, and sensor
+    right_goal_base = _create_goal_base([table_length / 2 + goal_depth * goal_extension_factor / 2, 0, z_height], "RightGoalBase")
+    right_goal_rails = _create_goal_rails([table_length / 2 + goal_depth * goal_extension_factor / 2, 0, z_height], "RightGoalRails", 1)
+    right_goal_sensor = _create_goal_sensor(
+        [table_length / 2 + sensor_offset, -goal_width / 2, table_top_z + puck_height / 2],
+        [table_length / 2 + sensor_offset, goal_width / 2, table_top_z + puck_height / 2],
+        "RightGoalSensor"
+    )
+
+    return {
+        'left_goal_base': left_goal_base,
+        'right_goal_base': right_goal_base,
+        'left_goal_rails': left_goal_rails,
+        'right_goal_rails': right_goal_rails,
+        'left_goal_sensor': left_goal_sensor,
+        'right_goal_sensor': right_goal_sensor
+    }
+
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #           LOAD ROBOTS WITH PADDLES AND PLACE THEM
+            #   (robot_left, robot_right, effector_left, effector_right)
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
 
 #---------------------------------------------
-# Create robots and place them
+# Create robots with paddels and place them
 #---------------------------------------------
-
 def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts=True):
     """
-    Loads and places two robot arms symmetrically on either side of the table.
+    Loads and places two robot arms symmetrically on either side of the table, with their paddles
+    positioned inside their respective goals and slightly above the board.
 
     Args:
         sim: CoppeliaSim simulation object.
@@ -327,22 +593,27 @@ def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts
 
         return handle
 
-    # Define left and right robot positions
-    left_pos  = [-table_length / 2 - robot_offset, 0, robot_z]
-    right_pos = [ table_length / 2 + robot_offset, 0, robot_z]
+    # Define left and right robot base positions
+    left_robot_base_pos = [-table_length / 2 - robot_offset, 0, robot_z]
+    right_robot_base_pos = [table_length / 2 + robot_offset, 0, robot_z]
 
     # Load both robots
-    robot_left = _load_robot_at(left_pos, "RobotLeft")
-    robot_right = _load_robot_at(right_pos, "RobotRight")
+    robot_left = _load_robot_at(left_robot_base_pos, "RobotLeft")
+    robot_right = _load_robot_at(right_robot_base_pos, "RobotRight")
 
     # Get end effectors (assumes "link7_visible" as the end)
     eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/link7_visible")
     eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/link7_visible")
 
     if attach_paddles:
+        # Attach paddles and position them inside respective goals
         attach_paddle(sim, eff_left, [0, 0, 1], "LeftPaddle")
         attach_paddle(sim, eff_right, [0, 1, 0], "RightPaddle")
 
+    # Get end effectors (assumes "link7_visible" as the end)
+    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/link7_visible/LeftPaddle")
+    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/link7_visible/RightPaddle")
+    
     return {
         'robot_left': robot_left,
         'robot_right': robot_right,
@@ -350,7 +621,9 @@ def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts
         'effector_right': eff_right
     }
 
-
+#---------------------------------------------
+# Attach paddles to end-effectors
+#---------------------------------------------
 def attach_paddle(sim, effector_handle, color, name):
     """
     Creates and attaches a paddle to the robot's end-effector.
@@ -366,10 +639,12 @@ def attach_paddle(sim, effector_handle, color, name):
     sim.setObjectParent(paddle, effector_handle, False)
     
     sim.setObjectPosition(paddle, [-0.0275, 0, 0], sim.handle_parent)  # Slight offset to lie flat
-    sim.setObjectOrientation(paddle, [0, math.radians(90), 0], sim.handle_parent)
+    sim.setObjectOrientation(paddle, [0, -math.radians(90), 0], sim.handle_parent)
     sim.setObjectAlias(paddle, name)
 
-
+#---------------------------------------------
+# Function to initialize robot joints
+#---------------------------------------------
 def initialize_robot_joints(sim, robot, target_positions_deg):
     """
     Sets the robot joint configuration to desired angles using trajectory motion.
@@ -410,6 +685,29 @@ def initialize_robot_joints(sim, robot, target_positions_deg):
     except Exception as e:
         print(f"[ERROR] Failed to move robot joints: {e}")
 
+#---------------------------------------------
+# Functions to get robots positions
+#---------------------------------------------
+def get_robot_position(robot_id):
+    """
+    Calculate the base position of a robot relative to the center of the table.
+
+    Args:
+        robot_id (int): 0 for the left robot, 1 for the right robot.
+
+    Returns:
+        list: A list containing the x, y position of the specified robot base.
+
+    Raises:
+        ValueError: If an invalid robot_id is provided.
+    """
+    if robot_id == 0:
+        return get_robot_left_position()
+    elif robot_id == 1:
+        return get_robot_right_position()
+    else:
+        raise ValueError("Invalid robot_id. Use 0 for left robot or 1 for right robot.")
+    
 def get_robot_left_position():
     """
     Calculate the base position of the left robot relative to the center of the table.
@@ -417,8 +715,7 @@ def get_robot_left_position():
     Returns:
         list: A list containing the x, y position of the left robot base.
     """
-    return [-table_length / 2 - 0.2, 0]  # 0.2 is the global robot_offset
-
+    return [-table_length / 2 - robot_offset, 0]  # Use the global robot_offset
 
 def get_robot_right_position():
     """
@@ -427,44 +724,416 @@ def get_robot_right_position():
     Returns:
         list: A list containing the x, y position of the right robot base.
     """
-    # Left robot base position (behind the left goal)
-    robot_left_pos = [-table_length / 2 - robot_offset, 0]  # (x, y)
+    return [table_length / 2 + robot_offset, 0]  # Use the global robot_offset
 
-    # Right robot base position (behind the right goal)
-    robot_right_pos = [table_length / 2 + robot_offset, 0]  # (x, y)
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ==================================================================
+            # ==================================================================
+            #           SETUP simIK ENVIRONMENT FOR ROBOT ARMS
+            #   (simIK, robot_left, robot_right, effector_left, effector_right)
+            # ==================================================================
+            # ==================================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------
+# SETS UP INVERSE KINEMATICS ENVIRONMENT FOR ROBOT ARMS
+#----------------------------------------------------------
+def setup_simIK_environment(sim, simIK, robot_handles):
+    """
+    Sets up a simIK environment for the 6DOF UR3 robot arms and positions their paddles
+    in the middle of their respective goals.
+
+    Args:
+        sim: The simulation object.
+        simIK: The simIK module.
+        robot_handles (dict): Dictionary containing robot and effector handles.
+
+    Returns:
+        dict: A dictionary containing IK environment, groups, joint handles, and dummies.
+    """
+    # Initialize simIK environment
+    ik_environment = simIK.createEnvironment()
+
+    def configure_robot_ik(sim, simIK, ik_environment, robot_handle, effector_handle, target_position, alias):
+        """
+        Configures simIK for a 6-DOF arm, ensuring the end-effector is always flat to the table.
+
+        Args:
+            sim: The simulation API.
+            simIK: The simIK API.
+            ik_environment: IK environment handle.
+            robot_handle: Handle to the robot base.
+            effector_handle: Handle to the end-effector (link7_visible).
+            target_position: Target world position [x, y, z].
+            alias: String alias for naming target dummy.
+
+        Returns:
+            Tuple (ik_group, joint_handles, dummy_handle)
+        """
+        # Create IK group
+        ik_group = simIK.createGroup(ik_environment)
+        simIK.setGroupCalculation(
+            ik_environment, ik_group,
+            simIK.method_damped_least_squares, 0.03, 100
+        )
+        
+        def create_downward_facing_dummy(sim, name, size=0.01):
+            """
+            Creates a dummy facing downward in -Z and returns its handle.
+
+            Args:
+            sim: The simulation object.
+            name: Alias name to give the dummy.
+            size: Size of the dummy.
+
+            Returns:
+            int: Handle to the dummy.
+            """
+            dummy = sim.createDummy(size)
+            sim.setObjectAlias(dummy, name)
+
+            # Orientation: facing -Z (identity with 180° rotation around X)
+            downward_orientation = [0, -math.pi, 0]  # Euler XYZ (180° about X axis)
+            sim.setObjectOrientation(dummy, downward_orientation, sim.handle_world)
+
+            return dummy
+
+        # Create downward-facing dummy
+        target_dummy = create_downward_facing_dummy(sim, f"{alias}_IK_Target", size=0.01)
+        sim.setObjectPosition(target_dummy, sim.handle_world, target_position)
+
+        # Get joint handles
+        joint_handles = []
+        for i in range(6):
+            joint_handle = sim.getObject(f"{sim.getObjectAlias(robot_handle, 2)}/joint", {'index': i})
+            joint_handles.append(joint_handle)
+
+        # Add IK element
+        simIK.addElementFromScene(
+            ik_environment,
+            ik_group,
+            robot_handle,       # base
+            effector_handle,    # tip
+            target_dummy,       # target
+            simIK.constraint_pose
+        )
+
+        # Solve and sync to sim
+        apply_ik_to_sim(simIK, ik_environment, ik_group)
+
+        print(f"[INFO] {alias} IK configured. Target: {target_position}")
+        return ik_group, joint_handles, target_dummy
+
+    # Paddle default start positions
+    left_paddle_position = [-table_length / 2 + 0.03, 0, table_top_z + puck_height*1/4]
+    right_paddle_position = [table_length / 2 - 0.03, 0, table_top_z + puck_height*1/4]
+
+    # Configure both robots
+    left_ik_group, left_joints, left_dummy = configure_robot_ik(
+        sim, simIK, ik_environment,
+        robot_handles['robot_left'],
+        robot_handles['effector_left'],
+        left_paddle_position,
+        "LeftRobot"
+    )
+
+    right_ik_group, right_joints, right_dummy = configure_robot_ik(
+        sim, simIK, ik_environment,
+        robot_handles['robot_right'],
+        robot_handles['effector_right'],
+        right_paddle_position,
+        "RightRobot"
+    )
+
+    return {
+        'ik_environment': ik_environment,
+        'left_ik_group': left_ik_group,
+        'right_ik_group': right_ik_group,
+        'left_joints': left_joints,
+        'right_joints': right_joints,
+        'left_target_dummy': left_dummy,
+        'right_target_dummy': right_dummy
+    }
+
 
 #---------------------------------------------
-# Setup the scene 
+# Apply IK to the robot arms
+#---------------------------------------------
+def apply_ik_to_sim(simIK, ik_env, ik_group):
+    """
+    Applies inverse kinematics by syncing from simulation, handling the IK group, and syncing back to simulation.
+
+    Args:
+        simIK: The simIK module.
+        ik_env: The IK environment handle.
+        ik_group: The IK group handle.
+
+    Returns:
+        int: The result of the IK group handling.
+    """
+    simIK.syncFromSim(ik_env, [ik_group])
+    result = simIK.handleGroup(ik_env, ik_group)
+    simIK.syncToSim(ik_env, [ik_group])
+    return result
+
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #     INVERSE KINEMATICS BASED POSITIONING FOR ROBOT ARMS
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#---------------------------------------------
+# Move the end-effector to a target position
+#---------------------------------------------
+def move_effector_to(sim, simIK, ik_environment, ik_group, dummy_target, target_position):
+    """
+    Moves the robot's end-effector to a target position using IK,
+    while keeping the orientation facing downward.
+
+    Args:
+        sim: The sim module.
+        simIK: The simIK module.
+        ik_environment: The IK environment handle.
+        ik_group: The IK group handle.
+        dummy_target: The dummy handle used as the target.
+        target_position: The 3D [x, y, z] world position to move to.
+    """
+    # Set dummy position (orientation already points downward)
+    sim.setObjectPosition(dummy_target, sim.handle_world, target_position)
+
+    # Perform IK and sync joints
+    apply_ik_to_sim(simIK, ik_environment, ik_group)
+
+#---------------------------------------------
+# Drag the paddle along a path
+#---------------------------------------------
+def drag_paddle_along_path(sim, simIK, ik_env, ik_group, target_dummy, waypoints):
+    """
+    Moves the paddle through a series of waypoints on the table using simIK,
+    ensuring the end-effector stays flat (downward-facing) throughout.
+
+    Args:
+        sim: CoppeliaSim remote API object
+        simIK: simIK module
+        ik_env: simIK environment handle
+        ik_group: simIK group handle
+        target_dummy: The target dummy used in IK
+        waypoints: A list of [x, y, z] positions
+    """
+    for point in waypoints:
+        sim.setObjectPosition(target_dummy, sim.handle_world, point)
+        apply_ik_to_sim(simIK, ik_env, ik_group)
+        time.sleep(0.05)  # Let sim settle (adjust duration for your frame rate)
+
+#---------------------------------------------
+# Generate a straight path between two points
+#---------------------------------------------
+def generate_straight_path(start, end, num_points):
+    """
+    Generates a straight line path between two points.
+
+    Args:
+        start: Starting [x, y, z] position.
+        end: Ending [x, y, z] position.
+        num_points: Number of points along the path.
+
+    Returns:
+        list: A list of [x, y, z] positions along the path.
+    """
+    return [[np.linspace(start[i], end[i], num_points).tolist() for i in range(3)]]
+
+#---------------------------------------------
+# Move dummies randomly
+#---------------------------------------------
+def move_dummies_randomly(sim, simIK, ik_handles):
+    left_bounds = {
+        'x': (-table_length/2 + 0.05, -0.35),  # Adjusted bounds to prevent overlap with table edges
+        'y': (-table_width/2 + 0.1, table_width/2 - 0.1)
+    }
+
+    right_bounds = {
+        'x': (0.35, table_length/2 - 0.05),  # Adjusted bounds to prevent overlap with table edges
+        'y': (-table_width/2 + 0.1, table_width/2 - 0.1)
+    }
+
+    z = table_top_z + puck_height * 0.5  # Adjusted Z to ensure dummies stay above the table
+
+    print("[TEST] Moving targets randomly... Press Ctrl+C to stop.")
+    try:
+        while True:
+            left_x = random.uniform(*left_bounds['x'])
+            left_y = random.uniform(*left_bounds['y'])
+
+            right_x = random.uniform(*right_bounds['x'])
+            right_y = random.uniform(*right_bounds['y'])
+
+            move_effector_to(sim, simIK, ik_handles['ik_environment'], ik_handles['left_ik_group'], ik_handles['left_dummy'], [left_x, left_y, z])
+            move_effector_to(sim, simIK, ik_handles['ik_environment'], ik_handles['right_ik_group'], ik_handles['right_dummy'], [right_x, right_y, z])
+
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("[TEST] Movement loop interrupted.")
+
+#---------------------------------------------
+# Start real-time IK tracking
+#---------------------------------------------
+def start_realtime_ik_tracking(sim, simIK, ik_env, left_ik_group, right_ik_group, left_target_dummy, right_target_dummy, left_bounds, right_bounds, axis='x', frequency=0.5, amplitude=0.1):
+    """
+    Continuously moves the IK target dummies for both arms back and forth smoothly in one direction,
+    and updates the IK groups in real time to track the movement.
+
+    Args:
+        sim: CoppeliaSim remote API object.
+        simIK: simIK module.
+        ik_env: IK environment handle.
+        left_ik_group: IK group handle for the left arm.
+        right_ik_group: IK group handle for the right arm.
+        left_target_dummy: Target dummy for the left arm.
+        right_target_dummy: Target dummy for the right arm.
+        left_bounds: Dict with 'x' and 'y' tuple bounds for the left arm.
+        right_bounds: Dict with 'x' and 'y' tuple bounds for the right arm.
+        axis: Which axis to animate (default: 'x').
+        frequency: Oscillation frequency in Hz.
+        amplitude: How far to move from center in meters.
+    """
+    left_center_x = sum(left_bounds['x']) / 2
+    left_center_y = sum(left_bounds['y']) / 2
+    right_center_x = sum(right_bounds['x']) / 2
+    right_center_y = sum(right_bounds['y']) / 2
+    z = table_top_z + puck_height * 0.25
+
+    start_time = sim.getSimulationTime()
+
+    print("[IK TRACKER] Real-time IK tracking started for both arms...")
+
+    try:
+        while True:
+            current_time = sim.getSimulationTime() - start_time
+            phase = 2 * math.pi * frequency * current_time
+            delta = amplitude * math.sin(phase)
+
+            # Update left arm target position
+            if axis == 'x':
+                left_pos = [left_center_x + delta, left_center_y, z]
+            else:
+                left_pos = [left_center_x, left_center_y + delta, z]
+            sim.setObjectPosition(left_target_dummy, sim.handle_world, left_pos)
+
+            # Update right arm target position
+            if axis == 'x':
+                right_pos = [right_center_x + delta, right_center_y, z]
+            else:
+                right_pos = [right_center_x, right_center_y + delta, z]
+            sim.setObjectPosition(right_target_dummy, sim.handle_world, right_pos)
+
+            # Handle IK groups for both arms
+            left_result = apply_ik_to_sim(simIK, ik_env, left_ik_group)
+            right_result = apply_ik_to_sim(simIK, ik_env, right_ik_group)
+
+            # Debugging logs
+            #print(f"[DEBUG] Left target position: {left_pos}, IK result: {left_result}")
+            #print(f"[DEBUG] Right target position: {right_pos}, IK result: {right_result}")
+
+            # Let the sim breathe a bit, but fast enough (~60 Hz)
+            time.sleep(0.016)
+    except KeyboardInterrupt:
+        print("[IK TRACKER] Stopped.")
+        return
+        
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #           FULL SCENE SETUP FOR SIMULATION
+            #   (table, puck, camera, goal_sections, simIK environment)
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#---------------------------------------------
+# Setup the complete simulation scene
 #---------------------------------------------
 def setup_scene():
     """
-    Sets up the complete simulation scene, including the table, puck, and robots.
+    Sets up the complete simulation scene, including the table, puck, robots, and simIK environment.
 
     Returns:
         tuple: The sim object and dictionary of handles.
     """
     client = RemoteAPIClient()
-    sim = client.getObject('sim')
-    print('[INFO] Connected to CoppeliaSim')
+    sim = client.require('sim')
+    simIK = client.require('simIK')
+    print('[setup_scene] [INFO] Connected to CoppeliaSim')
 
     sim.stopSimulation()
+    print('[setup_scene] [INFO] Stopped any running simulation.')
     sim.startSimulation()
+    print('[setup_scene] [INFO] Started simulation.')
     time.sleep(1)
+    
+    # Load and place the robot pair with paddles attached
+    print('[setup_scene] [INFO] Loading and placing robot pair...')
+    robot_handles = load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts=True)
+    print(f'[setup_scene] [DEBUG] Robot handles: {robot_handles}')
+    
+    # Wait for a moment to ensure the table and components are fully initialized
+    print('[setup_scene] [INFO] Waiting for components to initialize...')
+    time.sleep(1)
+    
+    # Create the hockey table, puck, camera, and goal sections
+    print('[setup_scene] [INFO] Creating hockey table, puck, camera, and goal sections...')
+    table, puck, camera, goal_sections = create_hockey_table(sim)
+    print(f'[setup_scene] [DEBUG] Table handle: {table}, Puck handle: {puck}, Camera handle: {camera}')
+    print(f'[setup_scene] [DEBUG] Goal sections: {goal_sections}')
 
-    robot_handles = load_and_place_robot_pair(sim, attach_paddles=True)
-    table, puck, camera = create_hockey_table(sim)
+    # Initialize the puck randomly in one of the player's alleys
+    print('[setup_scene] [INFO] Initializing puck randomly...')
+    initialize_puck_randomly(sim, puck)
 
+    # Initialize robot joints to default positions
+    print('[setup_scene] [INFO] Initializing robot joints to default positions...')
     initialize_robot_joints(sim, robot_handles['robot_left'], [-90, 60, 45, -15, -90, 180])
+    print('[setup_scene] [INFO] Left robot joints initialized.')
     initialize_robot_joints(sim, robot_handles['robot_right'], [90, 60, 45, -15, -90, 90])
+    print('[setup_scene] [INFO] Right robot joints initialized.')
+    
+    # Introduce a delay to ensure all objects are properly initialized
+    print('[setup_scene] [INFO] Waiting for objects to settle...')
+    time.sleep(2)
 
-    handles = {\
+    # Setup simIK environment for the robots
+    print('[setup_scene] [INFO] Setting up simIK environment...')
+    ik_handles = setup_simIK_environment(sim, simIK, robot_handles)
+    print(f'[setup_scene] [DEBUG] IK handles: {ik_handles}')
+
+    handles = {
         'table': table,
         'camera': camera,
         'effector_left': robot_handles['effector_left'],
         'effector_right': robot_handles['effector_right'],
         'robot_left': robot_handles['robot_left'],
         'robot_right': robot_handles['robot_right'],
-        'puck': puck
+        'puck': puck,
+        'left_goal_base': goal_sections['left_goal_base'],
+        'right_goal_base': goal_sections['right_goal_base'],
+        'left_goal_rails': goal_sections['left_goal_rails'],
+        'right_goal_rails': goal_sections['right_goal_rails'],
+        'left_goal_sensor': goal_sections['left_goal_sensor'],
+        'right_goal_sensor': goal_sections['right_goal_sensor'],
+        'ik_environment': ik_handles['ik_environment'],
+        'left_ik_group': ik_handles['left_ik_group'],
+        'right_ik_group': ik_handles['right_ik_group'],
+        'left_joints': ik_handles['left_joints'],
+        'right_joints': ik_handles['right_joints'],
+        'left_target_dummy': ik_handles['left_target_dummy'],
+        'right_target_dummy': ik_handles['right_target_dummy'],
     }
 
     print("[TEST] Scene setup complete.")
@@ -475,15 +1144,75 @@ def setup_scene():
     print("Robot left:", handles['robot_left'])
     print("Robot right:", handles['robot_right'])
     print("Puck handle:", handles['puck'])
+    print("Left goal base handle:", handles['left_goal_base'])
+    print("Right goal base handle:", handles['right_goal_base'])
+    print("Left goal rails handles:", handles['left_goal_rails'])
+    print("Right goal rails handles:", handles['right_goal_rails'])
+    print("Left goal sensor handle:", handles['left_goal_sensor'])
+    print("Right goal sensor handle:", handles['right_goal_sensor'])
 
     return sim, handles
-#---------------------------------------------
 
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+            # ============================================================
+            # ============================================================
+            #          TESTING THE SCENE BUILDING & SIMULATION
+            # ============================================================
+            # ============================================================
+#--------------------------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+
+#---------------------------------------------
+# Main function to setup simulation and run
+# just a back and forth movement
+#---------------------------------------------
 def main(sim_file=None):
     sim, handles = setup_scene()
-    
-    input("[TEST] Press Enter to stop simulation...")
-    
+    simIK = RemoteAPIClient().require('simIK')
+
+    # Define bounds for left and right robots
+    left_bounds = {
+        'x': (-table_length / 2 + 0.05, -0.05),
+        'y': (-table_width / 2 + 0.05, table_width / 2 - 0.05)
+    }
+    right_bounds = {
+        'x': (0.05, table_length / 2 - 0.05),
+        'y': (-table_width / 2 + 0.05, table_width / 2 - 0.05)
+    }
+
+    # Prompt user to select test type
+    print("Select test type:")
+    print("1. Real-time IK tracking (back and forth movement)")
+    print("2. Random dummy movement")
+    choice = input("Enter your choice (1 or 2): ")
+
+    if choice == "1":
+        start_realtime_ik_tracking(
+            sim,
+            simIK,
+            handles['ik_environment'],
+            handles['left_ik_group'],
+            handles['right_ik_group'],
+            handles['left_target_dummy'],
+            handles['right_target_dummy'],
+            left_bounds=left_bounds,
+            right_bounds=right_bounds,
+            axis='y',         # Move back and forth in Y
+            frequency=0.5,    # 0.5 Hz (1 cycle every 2s)
+            amplitude=0.15    # ±0.15 m movement
+        )
+    elif choice == "2":
+        move_dummies_randomly(sim, simIK, {
+            'ik_environment': handles['ik_environment'],
+            'left_ik_group': handles['left_ik_group'],
+            'right_ik_group': handles['right_ik_group'],
+            'left_dummy': handles['left_target_dummy'],
+            'right_dummy': handles['right_target_dummy'],
+        })
+    else:
+        print("Invalid choice. Exiting.")
+
     if sim_file:
         print(f'Saving sim to {sim_file}')
         sim.saveScene(sim_file)
