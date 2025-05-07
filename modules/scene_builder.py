@@ -65,7 +65,7 @@ table_restitution = 0.8     # Coefficient of restitution (bounciness) for the ta
 
 # Define additional parameters
 rail_thickness = 0.02                       # Thickness of the table's side rails in meters
-rail_height = 0.05                          # Height of the table's side rails in meters
+rail_height = 0.08                          # Height of the table's side rails in meters
 rail_z = table_height + (rail_height / 3)   # Z-position of the rail's bottom, slightly above the table's top
 
 # Define goal parameters
