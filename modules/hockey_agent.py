@@ -135,33 +135,73 @@ class HockeyAgent:
         """
         Compute the recommended target position for the end-effector based on puck data.
         Uses board-centered coordinates.
-        Only plans to hit or position on the agent's own court side (x < 0 for left, x > 0 for right).
+        If puck is not in strike zone, predict where it will bounce into the strike zone (ray tracing).
+        If no intersection, stay at center of strike zone edge closest to own goal.
         """
         if puck_data["position"] is None or puck_data["velocity"] is None:
             return None
-        pos_board = puck_data["position"]["board"]
-        vel = puck_data["velocity"]
-        prediction_time = 0.5
-        future_position = np.array(pos_board) + np.array(vel) * prediction_time
+        pos_board = np.array(puck_data["position"]["board"])
+        vel = np.array(puck_data["velocity"])
+        strike_zone = self.strike_zone
 
         # Determine which side this agent is on
         my_x = self.base_position[0]
         is_left_agent = my_x < 0
 
-        # Only plan to hit or position on own side
-        def is_on_own_side(x):
-            return (is_left_agent and x < 0) or (not is_left_agent and x > 0)
+        # Helper: is position in strike zone
+        def in_strike_zone(pos):
+            x, y = pos
+            return (strike_zone["x_min"] <= x <= strike_zone["x_max"] and
+                    strike_zone["y_min"] <= y <= strike_zone["y_max"])
 
-        # Only plan if the predicted position is on own side and in strike zone
-        if np.linalg.norm(vel) > 1e-3:
-            if is_on_own_side(future_position[0]) and self._is_within_strike_zone(future_position):
-                return [future_position[0], future_position[1], self.base_position[2]]
-
-        puck_x = pos_board[0]
-        if is_on_own_side(puck_x) and self._is_within_strike_zone(pos_board):
+        # If puck is in strike zone, go to it
+        if in_strike_zone(pos_board):
             return [pos_board[0], pos_board[1], self.base_position[2]]
 
-        return None
+        # If puck is moving, try to predict where it will enter strike zone (ray tracing)
+        if np.linalg.norm(vel) > 1e-3:
+            # Ray trace puck trajectory with bounces until it hits strike zone or max steps
+            bounds = self.puck_tracker.get_court_bounds()["outer"]
+            x_min, y_min, w, h = bounds
+            x_max, y_max = x_min + w, y_min + h
+
+            position = pos_board.copy()
+            velocity = vel.copy()
+            max_steps = 300
+            time_step = 0.02
+
+            for _ in range(max_steps):
+                # Move
+                position = position + velocity * time_step
+
+                # Bounce off left/right walls
+                if position[0] <= x_min or position[0] >= x_max:
+                    velocity[0] = -velocity[0]
+                    position[0] = np.clip(position[0], x_min, x_max)
+                # Bounce off top/bottom walls
+                if position[1] <= y_min or position[1] >= y_max:
+                    velocity[1] = -velocity[1]
+                    position[1] = np.clip(position[1], y_min, y_max)
+
+                # If enters strike zone, go there
+                if in_strike_zone(position):
+                    return [position[0], position[1], self.base_position[2]]
+
+            # If no intersection, go to center of strike zone edge closest to own goal
+            if is_left_agent:
+                x_edge = strike_zone["x_min"]
+            else:
+                x_edge = strike_zone["x_max"]
+            y_center = (strike_zone["y_min"] + strike_zone["y_max"]) / 2
+            return [x_edge, y_center, self.base_position[2]]
+
+        # If puck is not moving, just stay at center of strike zone edge closest to own goal
+        if is_left_agent:
+            x_edge = strike_zone["x_min"] + 0.1
+        else:
+            x_edge = strike_zone["x_max"] + 0.1
+        y_center = (strike_zone["y_min"] + strike_zone["y_max"]) / 2
+        return [x_edge, y_center, self.base_position[2]]
 
     def _is_within_strike_zone(self, position):
         x, y = position

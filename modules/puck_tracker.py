@@ -66,6 +66,8 @@ class PuckTracker:
         self.wall_buffer = wall_buffer
         self.referee_initialized = threading.Event()  # Event to signal referee initialization
         self.rail_offsets = rail_offsets  # [top, bottom, left, right]
+        self.scores = {"left": 0, "right": 0}  # Always have scores for overlay
+        self.last_puck_detected_time = time.time()
 
         # Initialize bounds as None; they will be dynamically extracted
         self.outer_bounds = None
@@ -188,6 +190,7 @@ class PuckTracker:
             if len(self.prev_positions) > 5:
                 self.prev_positions.pop(0)
             avg_pos = np.mean(self.prev_positions, axis=0)
+            self.last_puck_detected_time = time.time()  # Update last seen time
             return {"board": tuple(avg_pos), "pixel": pos_pixel}
         print("[DEBUG] No puck detected")
         return None
@@ -302,7 +305,7 @@ class PuckTracker:
                 #print("[DEBUG] Using cached bounds")
                 return self._cached_bounds
             else:
-                print("[DEBUG] Mask changed significantly, recalculating bounds, Mask difference: {diff}")
+                print(f"[DEBUG] Mask changed significantly, recalculating bounds, Mask difference: {diff}")
 
         print(f"[DEBUG] Mask dimensions: (h={h}, w={w}), Center: (cx={cx}, cy={cy})")
         
@@ -505,8 +508,9 @@ class PuckTracker:
             # Overlay puck velocity as an arrow
             if puck_velocity:
                 vx, vy = puck_velocity
+                # Flip vy for display to match image coordinates (since board +y is image top, but pixel y increases downward)
                 end_x = int(cx + vx * 50 / self.pixel_to_meter)
-                end_y = int(cy + vy * 50 / self.pixel_to_meter)
+                end_y = int(cy - vy * 50 / self.pixel_to_meter)
                 cv2.arrowedLine(overlay, (cx, cy), (end_x, end_y), (255, 0, 0), 2, tipLength=0.3)
                 cv2.putText(overlay, f"Vel: ({vx:.2f}, {vy:.2f})",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (139, 0, 0), 2)
@@ -534,8 +538,7 @@ class PuckTracker:
             bar_coords = draw_overlay_scale_bar(overlay, overlay_alpha)
 
             # Overlay game state (scores) using self.scores if available
-            if hasattr(self, "scores"):
-                # Display scores at the top
+            if hasattr(self, "scores") and self.scores is not None:
                 left_score_position = (50, 50)
                 right_score_position = (overlay.shape[1] - 200, 50)
                 game_title_position = (overlay.shape[1] // 2 - 150, 100)

@@ -1,5 +1,6 @@
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import threading
+import os, time
 import queue
 import modules.scene_builder as scene_builder
 from modules.puck_tracker import PuckTracker
@@ -40,7 +41,24 @@ def process_puck_data(agent, side):
             continue
 
 
-def main():
+def initialize_puck_for_side(sim, puck_handle, side):
+    """
+    Initialize the puck in the alley of the given side ("left" or "right").
+    """
+    import random
+    from modules.scene_builder import table_length, goal_width, table_top_z, puck_height
+
+    if side == "left":
+        x_range = (-table_length / 2 + 0.1, -table_length / 2 + 0.3)
+    else:
+        x_range = (table_length / 2 - 0.3, table_length / 2 - 0.1)
+    y_range = (-goal_width / 2 + 0.05, goal_width / 2 - 0.05)
+    x_pos = random.uniform(*x_range)
+    y_pos = random.uniform(*y_range)
+    sim.setObjectPosition(puck_handle, sim.handle_parent, [x_pos, y_pos, table_top_z + puck_height / 2])
+    print(f"[INFO] Puck initialized for {side} at ({x_pos:.2f}, {y_pos:.2f})")
+
+def main(sim_file=None):
     client = RemoteAPIClient()
     sim = client.require('sim')
     
@@ -59,9 +77,10 @@ def main():
         table_length=scene_builder.table_length,
         table_width=scene_builder.table_width,
         rail_thickness=scene_builder.rail_thickness,
-        rail_offsets=(15, 15, 15, 15),  # [top, bottom, left, right]
+        rail_offsets=(18, 18, 20, 20),  # [top, bottom, left, right]
     )
     tracker.extract_court_bounds()
+    tracker.update_scores({"left": 0, "right": 0})  # Ensure scores always initialized
 
     # Initialize the GameReferee
     referee = GameReferee(
@@ -86,6 +105,10 @@ def main():
 
     print("[INFO] Starting puck tracking and agent control...")
 
+    # For puck missing detection
+    last_puck_seen_time = time.time()
+    puck_missing_timeout = 5.0  # seconds
+
     try:
         while not stop_event.is_set():
             # For each agent, get their recommended position and apply it to the robot arm
@@ -104,9 +127,22 @@ def main():
             if goal_side:
                 print(f"[INFO] Goal scored on the {goal_side} side!")
                 tracker.update_scores(referee.scores)
-                scene_builder.initialize_puck_randomly(sim, handles['puck'])
+                # The side that got scored on gets to start
+                initialize_puck_for_side(sim, handles['puck'], goal_side)
+                # Reset puck detection timer
+                tracker.last_puck_detected_time = time.time()
 
-            #time.sleep(0.05)
+            # Check for puck missing for too long
+            if time.time() - tracker.last_puck_detected_time > puck_missing_timeout:
+                print("[WARN] Puck not detected for 5s, resetting puck randomly.")
+                # Alternate which side starts, or just randomize
+                # Here, randomize side for fairness
+                import random
+                side = random.choice(["left", "right"])
+                initialize_puck_for_side(sim, handles['puck'], side)
+                tracker.last_puck_detected_time = time.time()
+
+            #time.sleep(0.01)
     except KeyboardInterrupt:
         print("\n[INFO] Stopping simulation...")
     finally:
@@ -116,8 +152,12 @@ def main():
         if tracker:
             del tracker  # Ensure __del__ cleanup runs
         print("\n[INFO] Stopping...")
+        if sim_file:
+            print(f'Saving sim to {sim_file}')
+            sim.saveScene(sim_file)
         sim.stopSimulation()
-
+        
 
 if __name__ == "__main__":
-    main()
+    sim_file = os.path.join(os.path.dirname(__file__), 'air_hockey_play.ttt')  # Example default file path
+    main(sim_file=sim_file)
