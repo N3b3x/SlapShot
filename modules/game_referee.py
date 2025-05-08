@@ -1,64 +1,94 @@
 import time
 import cv2
+import numpy as np
 
 class GameReferee:
-    def __init__(self, court_bounds, goal_width):
+    def __init__(self, sim, left_goal_sensor, right_goal_sensor, puck_handle, goal_width):
         """
-        Initialize the GameReferee.
+        Initialize the GameReferee with actual proximity sensor handles.
 
         Args:
-            court_bounds: A dictionary containing the outer and inner bounds of the court.
-                          Example: {"outer": (x, y, w, h), "inner": (x, y, w, h)}.
-            goal_width: The width of the goal opening.
+            sim: The simulation object for checking sensor states.
+            left_goal_sensor (int): Handle for the left goal's proximity sensor.
+            right_goal_sensor (int): Handle for the right goal's proximity sensor.
+            puck_handle (int): Handle for the puck object.
+            goal_width (float): Width of the goal opening.
         """
-        self.court_bounds = court_bounds
+        self.sim = sim
+        self.left_sensor = left_goal_sensor
+        self.right_sensor = right_goal_sensor
+        self.puck_handle = puck_handle
         self.goal_width = goal_width
         self.scores = {"left": 0, "right": 0}
         self.last_goal_time = 0
-        self.goal_cooldown = 2  # Cooldown in seconds to prevent double-counting goals
+        self.goal_cooldown = 2  # seconds
 
-    def check_goal(self, puck_position):
+    def check_goal(self):
         """
-        Check if the puck has entered a goal and update the score.
-
-        Args:
-            puck_position: The puck's position in world coordinates (x, y).
+        Check proximity sensors to determine if a goal was scored.
 
         Returns:
-            str: "left" if the left goal was scored, "right" if the right goal was scored, None otherwise.
+            str: "left" or "right" if goal detected, else None.
         """
-        if puck_position is None:
+        now = time.time()
+        if now - self.last_goal_time < self.goal_cooldown:
             return None
 
-        x, y = puck_position
-        outer_x, outer_y, outer_w, outer_h = self.court_bounds["outer"]
+        try:
+            # Use sim.checkProximitySensor for silent detection
+            result_left, _, _, detected_obj_left, _ = self.sim.checkProximitySensor(self.left_sensor, self.sim.handle_all)
+            result_right, _, _, detected_obj_right, _ = self.sim.checkProximitySensor(self.right_sensor, self.sim.handle_all)
 
-        # Check if the puck is outside the table bounds
-        if x < outer_x or x > outer_x + outer_w:
-            now = time.time()
-            if now - self.last_goal_time < self.goal_cooldown:
-                return None  # Prevent double-counting goals
-
-            self.last_goal_time = now
-            if x < outer_x:  # Left goal
+            # Check if the detected object is the puck
+            if result_left == 1 and detected_obj_left == self.puck_handle:
                 self.scores["right"] += 1
+                self.last_goal_time = now
                 return "right"
-            elif x > outer_x + outer_w:  # Right goal
+            elif result_right == 1 and detected_obj_right == self.puck_handle:
                 self.scores["left"] += 1
+                self.last_goal_time = now
                 return "left"
-
+        except Exception as e:
+            print(f"[ERROR] Failed to check proximity sensor: {e}")
         return None
 
-    def display_game_state(self, img):
+    def check_stalled_puck(self, puck_position, puck_velocity, last_positions, threshold_time=3.0, velocity_thresh=1e-3):
         """
-        Overlay the game state (scores) on the puck tracker display canvas.
+        Check if the puck has been stalled for too long.
+
+        Returns:
+            bool: True if the puck is stalled, False otherwise.
+        """
+        if np.linalg.norm(puck_velocity) < velocity_thresh:
+            # Check if puck hasn't moved for threshold_time
+            if len(last_positions) >= int(threshold_time / 0.05):
+                dists = [np.linalg.norm(np.array(puck_position) - np.array(pos)) for pos in last_positions]
+                if max(dists) < 0.01:
+                    return True
+        return False
+
+    def display_game_state(self, img, position_bit=0):
+        """
+        Overlay the game state (scores) as titles on the image.
 
         Args:
             img: The image to overlay the game state on (numpy array).
+            position_bit (int): 0 for bottom, 1 for top to specify where to display the scores.
         """
-        # Display scores
-        cv2.putText(img, f"Left: {self.scores['left']}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(img, f"Right: {self.scores['right']}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        if position_bit == 1:
+            # Calculate the positions for the scores at the top
+            left_score_position = (50, 50)
+            right_score_position = (img.shape[1] - 200, 50)
+            game_title_position = (img.shape[1] // 2 - 150, 100)
+        else:
+            # Calculate the positions for the scores at the bottom
+            left_score_position = (50, img.shape[0] - 50)
+            right_score_position = (img.shape[1] - 200, img.shape[0] - 50)
+            game_title_position = (img.shape[1] // 2 - 150, img.shape[0] - 100)
 
-        # Display game status
-        cv2.putText(img, "Air Hockey Game", (img.shape[1] // 2 - 100, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        # Display scores
+        cv2.putText(img, f"Left: {self.scores['left']}", left_score_position, cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        cv2.putText(img, f"Right: {self.scores['right']}", right_score_position, cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+
+        # Display game title
+        cv2.putText(img, "Air Hockey Game", game_title_position, cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)

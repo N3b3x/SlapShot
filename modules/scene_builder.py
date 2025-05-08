@@ -53,6 +53,7 @@ ROBOT_MODEL = "UR3"  # Robot model being used.
 #---------------------------------------------
 # TABLE DIMENSIONS AND PROPERTIES
 #---------------------------------------------
+# Define table dimensions and properties
 table_length = 1.2  # Length of the air hockey table in meters
 table_width = 0.7   # Width of the air hockey table in meters
 table_height = 0.02 # Thickness of the table in meters
@@ -60,13 +61,17 @@ z_height = 0.01     # Height of the table's base from the ground in meters
 table_top_z = z_height + table_height  # Height of the table's top surface from the ground
 
 # Define table physical properties
-table_friction = 0.001       # Friction coefficient for the table surface
+table_friction = 0.0001       # Friction coefficient for the table surface
 table_restitution = 0.8     # Coefficient of restitution (bounciness) for the table surface
 
 # Define additional parameters
 rail_thickness = 0.02                       # Thickness of the table's side rails in meters
 rail_height = 0.08                          # Height of the table's side rails in meters
 rail_z = table_height + (rail_height / 3)   # Z-position of the rail's bottom, slightly above the table's top
+
+# Define table rails physical properties
+table_rails_friction = 0.0001      # Friction coefficient for the table rails surface
+table_rails_restitution = 0.2     # Coefficient of restitution (bounciness) for the table surface
 
 # Define goal parameters
 goal_width = 0.2  # Width of the goal opening in meters
@@ -81,18 +86,44 @@ puck_mass = 0.17            # Mass of the puck in kilograms
 puck_inertia_x, puck_inertia_y, puck_inertia_z = calculate_puck_inertia(puck_mass, puck_radius, puck_height)
 
 # Puck physical properties
-puck_restitution = 0.8          # Coefficient of restitution (bounciness) for the puck
-puck_friction = 0.002            # Friction coefficient for the puck's interaction with the table
-puck_rolling_friction = 0.0005  # Rolling friction coefficient for the puck
-puck_linear_damping = 0.00     # Linear damping to reduce puck's velocity over time
-puck_angular_damping = 0.00    # Angular damping to reduce puck's spin over time
+puck_restitution = 0.9          # Coefficient of restitution (bounciness) for the puck
+puck_friction = 0.0001          # Friction coefficient for the puck's interaction with the table
+puck_rolling_friction = 0.0000  # Rolling friction coefficient for the puck
+puck_linear_damping = 0.00      # Linear damping to reduce puck's velocity over time
+puck_angular_damping = 0.00     # Angular damping to reduce puck's spin over time
 
+#---------------------------------------------
+# CAMERA PARAMETERS
+#---------------------------------------------
+camera_resolution = [640, 480]  # Resolution: width x height
+camera_near_clipping = 0.1  # Near clipping plane
+camera_far_clipping = 10  # Far clipping plane
+camera_fov = 60  # Field of view in degrees
+camera_sensor_size = 0.03  # Sensor size
+
+camera_position = [0, 0, 0.5]  # X, Y, Z position (2 meters above the center of the table)
+camera_orientation = [0, math.radians(180), 0]  # Rotate -90° around X-axis to look straight down
 #---------------------------------------------
 # ROBOT PLACEMENT PROPERTIES
 #---------------------------------------------
 robot_base_width = 0.15  # Width of the robot's base in meters
 robot_z = table_top_z    # Z-position of the robot's base, aligned with the table's top surface
 robot_offset = 0.2       # Distance of the robot's base from the goal in meters
+
+paddle_friction = 0.001  # Friction coefficient for the paddle
+paddle_restitution = 0.5  # Coefficient of restitution (bounciness) for the paddle
+
+# Export variables for external access
+__all__ = [
+    "table_length", "table_width", "table_height", "z_height", "table_top_z",
+    "table_friction", "table_restitution", "rail_thickness", "rail_height", "rail_z",
+    "table_rails_friction", "table_rails_restitution", "goal_width",
+    "puck_radius", "puck_height", "puck_mass", "puck_inertia_x", "puck_inertia_y", "puck_inertia_z",
+    "puck_restitution", "puck_friction", "puck_rolling_friction", "puck_linear_damping", "puck_angular_damping",
+    "robot_base_width", "robot_z", "robot_offset", "paddle_friction", "paddle_restitution",
+    "camera_resolution", "camera_near_clipping", "camera_far_clipping", "camera_fov", "camera_sensor_size",
+    "camera_position", "camera_orientation"
+]
 
 #--------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------
@@ -278,8 +309,10 @@ def create_rails(sim, table):
         apply_physics_properties(sim, rail, {
             'respondable': True,
             'dynamic': False,
-            'bullet.friction': 0.01,   # Rails should barely resist puck
-            'bullet.restitution': 0.9  # High bounce off rail
+            'bullet.friction': table_rails_friction,
+            'bullet.frictionOld': table_rails_friction,
+            'bullet.restitution': table_rails_restitution,  # High bounce off rail
+            'bullet.stickyContact': False
         })
 
     # Side and goal rails
@@ -357,14 +390,12 @@ def create_top_camera(sim, table):
     # Add a top-down perspective camera
     camera_handle = sim.createVisionSensor(
         2,  # options: bit 1 set for perspective mode
-        [640, 480, 0, 0],  # intParams: high resolution (1280x720), reserved params set to 0
-        [0.1, 10, 60, 0.03, 0, 0, 0, 0, 0, 0, 0]  # floatParams: near clipping, far clipping, FOV, sensor size, and null pixel settings
+        [*camera_resolution, 0, 0],  # intParams: resolution, reserved params set to 0
+        [camera_near_clipping, camera_far_clipping, camera_fov, camera_sensor_size, 0, 0, 0, 0, 0, 0, 0]  # floatParams: clipping, FOV, sensor size, and null pixel settings
     )
     sim.setObjectAlias(camera_handle, "TopCamera")
 
     # Position the camera above the scene
-    camera_position = [0, 0, 0.5]  # X, Y, Z position (2 meters above the center of the table)
-    camera_orientation = [0, math.radians(-180), 0]  # Rotate -90° around X-axis to look straight down
     sim.setObjectPosition(camera_handle, -1, camera_position)
     sim.setObjectOrientation(camera_handle, camera_orientation, -1)
 
@@ -431,7 +462,9 @@ def create_goal_sections(sim, table):
         apply_physics_properties(sim, goal_base, {
             'respondable': True,
             'dynamic': False,
-            'bullet.friction': 0.01,
+            'bullet.friction': 0.1,
+            'bullet.frictionOld': 0.1,
+            'bullet.stickyContact': True,
             'bullet.restitution': 0.6
         })
         return goal_base
@@ -469,8 +502,10 @@ def create_goal_sections(sim, table):
             apply_physics_properties(sim, rail, {
                 'respondable': True,
                 'dynamic': False,
-                'bullet.friction': 0.01,
-                'bullet.restitution': 0.01
+                'bullet.friction': table_rails_friction,
+                'bullet.frictionOld': table_rails_friction,
+                'bullet.restitution': table_rails_restitution,  # High bounce off rail
+                'bullet.stickyContact': False
             })
             rails.append(rail)
         return rails
@@ -649,7 +684,11 @@ def attach_paddle(sim, effector_handle, color, name):
     
     apply_physics_properties(sim, paddle, {
         'dynamic': False,  # Paddles are typically static since they are controlled by the robot
-        'respondable': True
+        'respondable': True,
+        'bullet.friction': paddle_friction,
+        'bullet.frictionOld': paddle_friction,
+        'bullet.stickyContact': False,
+        'bullet.restitution': paddle_restitution,
     })
 
 #---------------------------------------------
@@ -698,43 +737,46 @@ def initialize_robot_joints(sim, robot, target_positions_deg):
 #---------------------------------------------
 # Functions to get robots positions
 #---------------------------------------------
-def get_robot_position(robot_id):
+def get_robot_position(sim, robot_handle):
     """
-    Calculate the base position of a robot relative to the center of the table.
+    Get the base position of a robot dynamically from its handle.
 
     Args:
-        robot_id (int): 0 for the left robot, 1 for the right robot.
+        sim: The simulation object.
+        robot_handle: The handle of the robot.
 
     Returns:
-        list: A list containing the x, y position of the specified robot base.
+        list: A list containing the x, y, z position of the robot's base.
+    """
+    if robot_handle == -1:
+        raise ValueError("[ERROR] Invalid robot handle provided.")
+    return sim.getObjectPosition(robot_handle, sim.handle_world)
 
-    Raises:
-        ValueError: If an invalid robot_id is provided.
+def get_robot_left_position(sim, handles):
     """
-    if robot_id == 0:
-        return get_robot_left_position()
-    elif robot_id == 1:
-        return get_robot_right_position()
-    else:
-        raise ValueError("Invalid robot_id. Use 0 for left robot or 1 for right robot.")
-    
-def get_robot_left_position():
-    """
-    Calculate the base position of the left robot relative to the center of the table.
+    Get the base position of the left robot dynamically.
+
+    Args:
+        sim: The simulation object.
+        handles: Dictionary of simulation handles.
 
     Returns:
-        list: A list containing the x, y position of the left robot base.
+        list: A list containing the x, y, z position of the left robot's base.
     """
-    return [-table_length / 2 - robot_offset, 0]  # Use the global robot_offset
+    return get_robot_position(sim, handles['robot_left'])
 
-def get_robot_right_position():
+def get_robot_right_position(sim, handles):
     """
-    Calculate the base position of the right robot relative to the center of the table.
+    Get the base position of the right robot dynamically.
+
+    Args:
+        sim: The simulation object.
+        handles: Dictionary of simulation handles.
 
     Returns:
-        list: A list containing the x, y position of the right robot base.
+        list: A list containing the x, y, z position of the right robot's base.
     """
-    return [table_length / 2 + robot_offset, 0]  # Use the global robot_offset
+    return get_robot_position(sim, handles['robot_right'])
 
 #--------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------
@@ -1161,7 +1203,7 @@ def setup_scene():
     print("Left goal sensor handle:", handles['left_goal_sensor'])
     print("Right goal sensor handle:", handles['right_goal_sensor'])
 
-    return sim, handles
+    return sim, simIK, handles
 
 #--------------------------------------------------------------------------------------------------
 #--------------------------------------------------------------------------------------------------
@@ -1178,8 +1220,7 @@ def setup_scene():
 # just a back and forth movement
 #---------------------------------------------
 def main(sim_file=None):
-    sim, handles = setup_scene()
-    simIK = RemoteAPIClient().require('simIK')
+    sim, simIK, handles = setup_scene()
 
     # Define bounds for left and right robots
     left_bounds = {
