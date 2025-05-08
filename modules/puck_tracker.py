@@ -451,7 +451,7 @@ class PuckTracker:
 
             # Create a new black mask with bounding rectangles
             bounding_mask = np.zeros_like(black_mask)
-            outer_bounds, inner_bounds = self._extract_play_area_bounds(black_mask)
+            outer_bounds, inner_bounds = self._cached_bounds#self._extract_play_area_bounds(black_mask)
 
             if outer_bounds:
                 x, y, w, h = outer_bounds
@@ -483,11 +483,11 @@ class PuckTracker:
                 cv2.line(overlay, (center_x, top_y), (center_x, bottom_y), (0, 0, 255), 3)
 
             # Optionally, you can remove or comment out the old center dot/circle:
-            # board_center_x = overlay.shape[1] // 2
-            # board_center_y = overlay.shape[0] // 2
-            # cv2.circle(overlay, (board_center_x, board_center_y), 10, (0, 0, 255), -1)
-            # cv2.putText(overlay, "C", (board_center_x - 15, board_center_y - 15),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            board_center_x = overlay.shape[1] // 2
+            board_center_y = overlay.shape[0] // 2
+            cv2.circle(overlay, (board_center_x, board_center_y), 10, (0, 0, 255), -1)
+            cv2.putText(overlay, "", (board_center_x - 15, board_center_y - 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             # Get the puck position and velocity
             puck_pos = self.get_puck_position()
@@ -509,8 +509,9 @@ class PuckTracker:
             if puck_velocity:
                 vx, vy = puck_velocity
                 # Flip vy for display to match image coordinates (since board +y is image top, but pixel y increases downward)
-                end_x = int(cx + vx * 50 / self.pixel_to_meter)
-                end_y = int(cy - vy * 50 / self.pixel_to_meter)
+                scale_factor = 30  # Reduce the scale factor to make the velocity vector smaller
+                end_x = int(cx + vx * scale_factor / self.pixel_to_meter)
+                end_y = int(cy - vy * scale_factor / self.pixel_to_meter)
                 cv2.arrowedLine(overlay, (cx, cy), (end_x, end_y), (255, 0, 0), 2, tipLength=0.3)
                 cv2.putText(overlay, f"Vel: ({vx:.2f}, {vy:.2f})",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (139, 0, 0), 2)

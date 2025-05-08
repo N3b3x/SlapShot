@@ -2,6 +2,7 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import threading
 import os, time
 import queue
+import numpy as np
 import modules.scene_builder as scene_builder
 from modules.puck_tracker import PuckTracker
 from modules.hockey_agent import HockeyAgent
@@ -57,6 +58,27 @@ def initialize_puck_for_side(sim, puck_handle, side):
     y_pos = random.uniform(*y_range)
     sim.setObjectPosition(puck_handle, sim.handle_parent, [x_pos, y_pos, table_top_z + puck_height / 2])
     print(f"[INFO] Puck initialized for {side} at ({x_pos:.2f}, {y_pos:.2f})")
+
+def puck_is_stalled(tracker, threshold_time=5.0, velocity_thresh=1e-3, min_dist=0.01):
+    """
+    Returns True if the puck hasn't moved significantly for threshold_time seconds.
+    """
+    # Use the last N positions over the threshold_time window
+    positions = tracker.prev_positions
+    if len(positions) < 2:
+        return False
+    # If velocity is low
+    velocity = tracker.get_puck_velocity()
+    if velocity is None or np.linalg.norm(velocity) > velocity_thresh:
+        return False
+    # Check if all positions are within min_dist of the latest
+    latest = np.array(positions[-1])
+    dists = [np.linalg.norm(np.array(p) - latest) for p in positions]
+    if max(dists) < min_dist:
+        # If the positions cover at least threshold_time (assuming 20Hz update)
+        if len(positions) >= int(threshold_time / 0.05):
+            return True
+    return False
 
 def main(sim_file=None):
     client = RemoteAPIClient()
@@ -127,16 +149,20 @@ def main(sim_file=None):
             if goal_side:
                 print(f"[INFO] Goal scored on the {goal_side} side!")
                 tracker.update_scores(referee.scores)
-                # The side that got scored on gets to start
                 initialize_puck_for_side(sim, handles['puck'], goal_side)
-                # Reset puck detection timer
                 tracker.last_puck_detected_time = time.time()
 
             # Check for puck missing for too long
             if time.time() - tracker.last_puck_detected_time > puck_missing_timeout:
                 print("[WARN] Puck not detected for 5s, resetting puck randomly.")
-                # Alternate which side starts, or just randomize
-                # Here, randomize side for fairness
+                import random
+                side = random.choice(["left", "right"])
+                initialize_puck_for_side(sim, handles['puck'], side)
+                tracker.last_puck_detected_time = time.time()
+
+            # Check for stalled puck (not moving for threshold_time)
+            if puck_is_stalled(tracker, threshold_time=5.0):
+                print("[WARN] Puck stalled for 5s, resetting puck randomly.")
                 import random
                 side = random.choice(["left", "right"])
                 initialize_puck_for_side(sim, handles['puck'], side)
