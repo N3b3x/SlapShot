@@ -113,7 +113,7 @@ def main(sim_file=None):
     )
 
     # Define strike depth (how far into the board the agent can go)
-    STRIKE_DEPTH = 0.25
+    STRIKE_DEPTH = 0.2
 
     # Initialize agents for both robots, passing strike_depth
     agents = {

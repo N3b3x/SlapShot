@@ -129,14 +129,12 @@ class HockeyAgent:
             recommended = self._compute_recommended_position(puck_data)
             with self.lock:
                 self.recommended_position = recommended
-            time.sleep(0.05)
 
     def _compute_recommended_position(self, puck_data):
         """
         Compute the recommended target position for the end-effector based on puck data.
         Uses board-centered coordinates.
-        If puck is not in strike zone, predict where it will bounce into the strike zone (ray tracing).
-        If no intersection, stay at center of strike zone edge closest to own goal.
+        If puck is not in strike zone but within STRIKE_DEPTH, recommend a strike along the edge to kick it out.
         """
         if puck_data["position"] is None or puck_data["velocity"] is None:
             return None
@@ -144,7 +142,6 @@ class HockeyAgent:
         vel = np.array(puck_data["velocity"])
         strike_zone = self.strike_zone
 
-        # Determine which side this agent is on
         my_x = self.base_position[0]
         is_left_agent = my_x < 0
 
@@ -154,13 +151,43 @@ class HockeyAgent:
             return (strike_zone["x_min"] <= x <= strike_zone["x_max"] and
                     strike_zone["y_min"] <= y <= strike_zone["y_max"])
 
+        # Helper: is position in STRIKE_DEPTH band (x only)
+        def in_strike_depth_band(pos):
+            x, _ = pos
+            if is_left_agent:
+                return strike_zone["x_min"] <= x <= strike_zone["x_max"]
+            else:
+                return strike_zone["x_min"] <= x <= strike_zone["x_max"]
+
         # If puck is in strike zone, go to it
         if in_strike_zone(pos_board):
             return [pos_board[0], pos_board[1], self.base_position[2]]
 
+        # If puck is in STRIKE_DEPTH band but outside strike zone (i.e., y out of bounds), try to "kick" it out
+        x, y = pos_board
+        if in_strike_depth_band(pos_board):
+            # Clamp y to nearest edge of strike zone
+            if y < strike_zone["y_min"]:
+                y_edge = strike_zone["y_min"]
+            elif y > strike_zone["y_max"]:
+                y_edge = strike_zone["y_max"]
+            else:
+                y_edge = y  # Shouldn't happen, but for completeness
+
+            # Try to hit behind the puck (toward own goal) to propel it out
+            # For left agent, behind is more negative x; for right agent, more positive x
+            if is_left_agent:
+                x_strike = max(x - 0.04, strike_zone["x_min"])
+            else:
+                x_strike = min(x + 0.04, strike_zone["x_max"])
+
+            # Stay within strike zone
+            x_strike = np.clip(x_strike, strike_zone["x_min"], strike_zone["x_max"])
+            y_strike = np.clip(y_edge, strike_zone["y_min"], strike_zone["y_max"])
+            return [x_strike, y_strike, self.base_position[2]]
+
         # If puck is moving, try to predict where it will enter strike zone (ray tracing)
         if np.linalg.norm(vel) > 1e-3:
-            # Ray trace puck trajectory with bounces until it hits strike zone or max steps
             bounds = self.puck_tracker.get_court_bounds()["outer"]
             x_min, y_min, w, h = bounds
             x_max, y_max = x_min + w, y_min + h
@@ -171,19 +198,13 @@ class HockeyAgent:
             time_step = 0.02
 
             for _ in range(max_steps):
-                # Move
                 position = position + velocity * time_step
-
-                # Bounce off left/right walls
                 if position[0] <= x_min or position[0] >= x_max:
                     velocity[0] = -velocity[0]
                     position[0] = np.clip(position[0], x_min, x_max)
-                # Bounce off top/bottom walls
                 if position[1] <= y_min or position[1] >= y_max:
                     velocity[1] = -velocity[1]
                     position[1] = np.clip(position[1], y_min, y_max)
-
-                # If enters strike zone, go there
                 if in_strike_zone(position):
                     return [position[0], position[1], self.base_position[2]]
 
