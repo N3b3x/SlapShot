@@ -1,4 +1,4 @@
-import time
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import threading
 import queue
 import modules.scene_builder as scene_builder
@@ -41,38 +41,46 @@ def process_puck_data(agent, side):
 
 
 def main():
+    client = RemoteAPIClient()
+    sim = client.require('sim')
+    
     # Set up the simulation scene
-    sim, simIK, handles = scene_builder.setup_scene()
+    _, _, handles = scene_builder.setup_scene()
 
-    # Initialize the PuckTracker
+    # Pass table and rail properties to PuckTracker
     tracker = PuckTracker(
-        sim,
         handles,
         scene_builder.goal_width,
         scene_builder.puck_radius,
         0.0,
         scene_builder.camera_fov,
         scene_builder.camera_position[2],
-        scene_builder.camera_resolution
+        scene_builder.camera_resolution,
+        table_length=scene_builder.table_length,
+        table_width=scene_builder.table_width,
+        rail_thickness=scene_builder.rail_thickness,
+        rail_offsets=(15, 15, 15, 15),  # [top, bottom, left, right]
     )
     tracker.extract_court_bounds()
 
     # Initialize the GameReferee
     referee = GameReferee(
-        sim,
         handles['left_goal_sensor'],
         handles['right_goal_sensor'],
         handles['puck'],
         scene_builder.goal_width
     )
 
-    # Initialize agents for both robots
+    # Define strike depth (how far into the board the agent can go)
+    STRIKE_DEPTH = 0.25
+
+    # Initialize agents for both robots, passing strike_depth
     agents = {
-        "left": HockeyAgent(sim, simIK, handles['ik_environment'], handles['left_ik_group'], handles['effector_left'], handles['robot_left'], tracker),
-        "right": HockeyAgent(sim, simIK, handles['ik_environment'], handles['right_ik_group'], handles['effector_right'], handles['robot_right'], tracker)
+        "left": HockeyAgent(handles['ik_environment'], handles['left_ik_group'], handles['effector_left'], handles['robot_left'], tracker, strike_depth=STRIKE_DEPTH),
+        "right": HockeyAgent(handles['ik_environment'], handles['right_ik_group'], handles['effector_right'], handles['robot_right'], tracker, strike_depth=STRIKE_DEPTH)
     }
 
-    # Enable agents
+    # Enable agents (this will set and update the strike zones in the tracker for overlay)
     for agent in agents.values():
         agent.enable()
 
@@ -80,16 +88,11 @@ def main():
 
     try:
         while not stop_event.is_set():
-            # Get puck data from the tracker
-            puck_data = tracker.get_puck_data()
-
-            # Feed puck data to each agent and apply their recommended position
+            # For each agent, get their recommended position and apply it to the robot arm
             for side, agent in agents.items():
-                recommended_position = agent.compute_target_position(puck_data)
+                recommended_position = agent.get_recommended_position()
                 if recommended_position is not None:
-                    scene_builder.move_effector_to(
-                        sim,
-                        simIK,
+                    scene_builder.move_effector_to_2(
                         handles['ik_environment'],
                         handles[f"{side}_ik_group"],
                         handles[f"{side}_target_dummy"],
@@ -100,11 +103,10 @@ def main():
             goal_side = referee.check_goal()
             if goal_side:
                 print(f"[INFO] Goal scored on the {goal_side} side!")
-                tracker.update_scores(referee.scores)  # Update scores in the tracker display
-                # Reset puck position after a goal
+                tracker.update_scores(referee.scores)
                 scene_builder.initialize_puck_randomly(sim, handles['puck'])
 
-            #time.sleep(0.05)  # Main loop delay
+            #time.sleep(0.05)
     except KeyboardInterrupt:
         print("\n[INFO] Stopping simulation...")
     finally:

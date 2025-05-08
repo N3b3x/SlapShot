@@ -1,10 +1,10 @@
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import numpy as np
 import threading
 import time
-from modules.scene_builder import move_effector_to, get_robot_position  # Import get_robot_position
 
 class HockeyAgent:
-    def __init__(self, sim, simIK, ik_environment, ik_group, effector_handle, robot_handle, puck_tracker):
+    def __init__(self, ik_environment, ik_group, effector_handle, robot_handle, puck_tracker, strike_depth=0.25):
         """
         Initialize the HockeyAgent.
 
@@ -17,37 +17,61 @@ class HockeyAgent:
             robot_handle: The handle to the robot's base.
             puck_tracker: The PuckTracker instance to dynamically acquire court bounds and other parameters.
         """
-        self.sim = sim
-        self.simIK = simIK
+        self.client = RemoteAPIClient()
+        self.sim = self.client.require('sim')
+        self.simIK = self.client.require('simIK')
         self.ik_environment = ik_environment
         self.ik_group = ik_group
         self.effector = effector_handle
-        # if not self.sim.getSimulationState() == self.sim.simulation_advancing_running:
-        #     raise RuntimeError("[ERROR] Simulation is not running. Cannot initialize HockeyAgent.")
-        # if robot_handle == -1:
-        #     raise ValueError("[ERROR] Invalid robot handle provided.")
         self.puck_tracker = puck_tracker
         self.robot_handle = robot_handle
         self.running = True
         self.enabled = False  # Add an enabled flag to control the agent
+        self.recommended_position = None
+        self.lock = threading.Lock()
         self.thread = threading.Thread(target=self._update_agent, daemon=True)
         self.thread.start()
+        self.strike_depth = strike_depth
 
     def enable(self):
         """
         Enable the agent's operations and initialize the base position and strike zone.
+        The strike zone is limited to the agent's own side, within the inner bounds, and only up to strike_depth into the board.
         """
-        self.base_position = np.array(self.sim.getObjectPosition(self.robot_handle, self.sim.handle_world))  # Extract base position dynamically
+        self.base_position = np.array(self.sim.getObjectPosition(self.robot_handle, self.sim.handle_world))
         court_bounds = self.puck_tracker.get_court_bounds()
         inner_bounds = court_bounds["inner"]
 
-        # Calculate the strike zone based on inner bounds with an offset
-        offset = 0.1  # Offset for forward motion
-        x_min = inner_bounds[0] + offset
-        x_max = inner_bounds[0] + inner_bounds[2] - offset
-        y_min = inner_bounds[1] + offset
-        y_max = inner_bounds[1] + inner_bounds[3] - offset
-        self.strike_zone = {"x_min": x_min, "x_max": x_max, "y_min": y_min, "y_max": y_max}
+        # inner_bounds: (x_min, y_min, width, height) in board-centered meters
+        x_min = inner_bounds[0]
+        x_max = inner_bounds[0] + inner_bounds[2]
+        y_min = inner_bounds[1]
+        y_max = inner_bounds[1] + inner_bounds[3]
+
+        # Determine which side this agent is on
+        is_left_agent = self.base_position[0] < 0
+
+        # For left agent, strike zone is from x_min to (x_min + strike_depth)
+        # For right agent, strike zone is from (x_max - strike_depth) to x_max
+        if is_left_agent:
+            sx_min = x_min
+            sx_max = min(x_min + self.strike_depth, 0)  # Don't cross center
+        else:
+            sx_max = x_max
+            sx_min = max(x_max - self.strike_depth, 0)  # Don't cross center
+
+        self.strike_zone = {
+            "x_min": sx_min,
+            "x_max": sx_max,
+            "y_min": y_min,
+            "y_max": y_max
+        }
+
+        # Communicate strike zone to puck tracker for overlay
+        if is_left_agent:
+            self.puck_tracker.set_strike_zones(left_strike_zone=self.strike_zone)
+        else:
+            self.puck_tracker.set_strike_zones(right_strike_zone=self.strike_zone)
 
         self.enabled = True
         print(f"[INFO] HockeyAgent enabled. Strike zone: {self.strike_zone}")
@@ -94,127 +118,64 @@ class HockeyAgent:
     def _update_agent(self):
         """
         Continuously monitor the puck's position and plan strikes.
+        Only computes and stores the recommended position, does not touch sim API.
         """
         while self.running:
             if not self.enabled:
-                time.sleep(0.1)  # Sleep briefly if the agent is disabled
+                time.sleep(0.1)
                 continue
 
-            # Check if the simulation is running
-            # if not self.sim.getSimulationState() == self.sim.simulation_advancing_running:
-            #     print("[WARN] Simulation is not running. Skipping agent update.")
-            #     time.sleep(0.1)
-            #     continue
-
             puck_data = self.puck_tracker.get_puck_data()
-            if (
-                puck_data["position"] is not None
-                and puck_data["velocity"] is not None
-                and puck_data["trajectory"]
-            ):
-                # Determine the intersection point with the strike line
-                strike_line_x = self.base_position[0]  # Strike line is at the robot's x-coordinate
-                for point in puck_data["trajectory"]:
-                    if abs(point[0] - strike_line_x) < 0.01:  # Check if the puck is near the strike line
-                        strike_position = np.array([strike_line_x, point[1], self.base_position[2]])
-                        self._move_to_strike_position(strike_position)
-                        break
-
+            recommended = self._compute_recommended_position(puck_data)
+            with self.lock:
+                self.recommended_position = recommended
             time.sleep(0.05)
 
+    def _compute_recommended_position(self, puck_data):
+        """
+        Compute the recommended target position for the end-effector based on puck data.
+        Uses board-centered coordinates.
+        Only plans to hit or position on the agent's own court side (x < 0 for left, x > 0 for right).
+        """
+        if puck_data["position"] is None or puck_data["velocity"] is None:
+            return None
+        pos_board = puck_data["position"]["board"]
+        vel = puck_data["velocity"]
+        prediction_time = 0.5
+        future_position = np.array(pos_board) + np.array(vel) * prediction_time
+
+        # Determine which side this agent is on
+        my_x = self.base_position[0]
+        is_left_agent = my_x < 0
+
+        # Only plan to hit or position on own side
+        def is_on_own_side(x):
+            return (is_left_agent and x < 0) or (not is_left_agent and x > 0)
+
+        # Only plan if the predicted position is on own side and in strike zone
+        if np.linalg.norm(vel) > 1e-3:
+            if is_on_own_side(future_position[0]) and self._is_within_strike_zone(future_position):
+                return [future_position[0], future_position[1], self.base_position[2]]
+
+        puck_x = pos_board[0]
+        if is_on_own_side(puck_x) and self._is_within_strike_zone(pos_board):
+            return [pos_board[0], pos_board[1], self.base_position[2]]
+
+        return None
+
     def _is_within_strike_zone(self, position):
-        """
-        Check if a position is within the robot's strike zone.
-
-        Args:
-            position (list): The [x, y] position to check.
-
-        Returns:
-            bool: True if the position is within the strike zone, False otherwise.
-        """
         x, y = position
         return (
             self.strike_zone["x_min"] <= x <= self.strike_zone["x_max"]
             and self.strike_zone["y_min"] <= y <= self.strike_zone["y_max"]
         )
 
-    def move_effector_to(self, target_position):
+    def get_recommended_position(self):
         """
-        Moves the robot's end-effector to a target position using IK,
-        while keeping the orientation facing downward.
-
-        Args:
-            target_position: The 3D [x, y, z] world position to move to.
+        Thread-safe getter for the recommended position.
         """
-        self.sim.setObjectPosition(self.effector, self.sim.handle_world, target_position)
-        self.apply_ik_to_sim()
-
-    def apply_ik_to_sim(self):
-        """
-        Applies inverse kinematics by syncing from simulation, handling the IK group, and syncing back to simulation.
-        """
-        self.simIK.syncFromSim(self.ik_environment, [self.ik_group])
-        self.simIK.handleGroup(self.ik_environment, self.ik_group)
-        self.simIK.syncToSim(self.ik_environment, [self.ik_group])
-
-    def _move_to_strike_position(self, position):
-        """
-        Move the robot's end-effector to the strike position using IK.
-
-        Args:
-            position (list): The target (x, y, z) position for the strike.
-        """
-        self.move_effector_to(position)
-
-    def compute_end_effector_pose(self, puck_data):
-        """
-        Compute the desired end-effector pose based on puck data.
-
-        Args:
-            puck_data (dict): A dictionary containing the puck's position, velocity, and trajectory.
-
-        Returns:
-            list: The desired [x, y, z] position for the end-effector.
-        """
-        # Example logic: Move to the predicted puck position
-        if puck_data["trajectory"]:
-            target_position = puck_data["trajectory"][0]  # First point in the trajectory
-            return [target_position[0], target_position[1], self.base_position[2]]  # Keep the same z-height
-        return None
-
-    def compute_target_position(self, puck_data):
-        """
-        Compute the desired target position for the end-effector based on puck data.
-
-        Args:
-            puck_data (dict): A dictionary containing the puck's position, velocity, and trajectory.
-
-        Returns:
-            list: The desired [x, y, z] position for the end-effector, or None if no valid position is found.
-        """
-        if puck_data["position"] is None or puck_data["velocity"] is None:
-            return None
-
-        # Predict the puck's future position
-        prediction_time = 0.5
-        future_position = np.array(puck_data["position"]) + np.array(puck_data["velocity"]) * prediction_time
-
-        # If puck is moving, use normal logic
-        if np.linalg.norm(puck_data["velocity"]) > 1e-3:
-            if self._is_within_strike_zone(future_position[:2]):
-                return [future_position[0], future_position[1], self.base_position[2]]
-
-        # Fallback: If puck is stopped and on our side, go to it and "strike"
-        puck_x = puck_data["position"][0]
-        my_x = self.base_position[0]
-        bounds = self.strike_zone
-        # Check if puck is on our half
-        if (my_x < 0 and puck_x < 0) or (my_x > 0 and puck_x > 0):
-            if self._is_within_strike_zone(puck_data["position"]):
-                # Move to puck and prepare to strike toward opponent
-                return [puck_data["position"][0], puck_data["position"][1], self.base_position[2]]
-
-        return None
+        with self.lock:
+            return self.recommended_position
 
     def shutdown(self):
         """

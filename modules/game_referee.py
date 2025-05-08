@@ -1,9 +1,10 @@
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import time
 import cv2
 import numpy as np
 
 class GameReferee:
-    def __init__(self, sim, left_goal_sensor, right_goal_sensor, puck_handle, goal_width):
+    def __init__(self, left_goal_sensor, right_goal_sensor, puck_handle, goal_width):
         """
         Initialize the GameReferee with actual proximity sensor handles.
 
@@ -14,7 +15,8 @@ class GameReferee:
             puck_handle (int): Handle for the puck object.
             goal_width (float): Width of the goal opening.
         """
-        self.sim = sim
+        self.client = RemoteAPIClient()
+        self.sim = self.client.require('sim')
         self.left_sensor = left_goal_sensor
         self.right_sensor = right_goal_sensor
         self.puck_handle = puck_handle
@@ -59,12 +61,24 @@ class GameReferee:
         Returns:
             bool: True if the puck is stalled, False otherwise.
         """
+        print("[DEBUG] Checking if puck is stalled...")
+        print(f"[DEBUG] Puck velocity: {puck_velocity}, Threshold: {velocity_thresh}")
         if np.linalg.norm(puck_velocity) < velocity_thresh:
+            print("[DEBUG] Puck velocity is below threshold.")
             # Check if puck hasn't moved for threshold_time
             if len(last_positions) >= int(threshold_time / 0.05):
+                print(f"[DEBUG] Last positions count: {len(last_positions)}, Required: {int(threshold_time / 0.05)}")
                 dists = [np.linalg.norm(np.array(puck_position) - np.array(pos)) for pos in last_positions]
+                print(f"[DEBUG] Distances from current position to last positions: {dists}")
                 if max(dists) < 0.01:
+                    print("[DEBUG] Puck has not moved significantly. It is stalled.")
                     return True
+                else:
+                    print("[DEBUG] Puck has moved significantly. It is not stalled.")
+            else:
+                print("[DEBUG] Not enough position history to determine if puck is stalled.")
+        else:
+            print("[DEBUG] Puck velocity is above threshold. It is not stalled.")
         return False
 
     def display_game_state(self, img, position_bit=0):

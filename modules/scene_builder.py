@@ -514,11 +514,11 @@ def create_goal_sections(sim, table):
         # Define proximity sensor parameters for a ray-type sensor
         sensor_type = sim.proximitysensor_ray_subtype
         sub_type = 16  # Deprecated, set to 16
-        options = 1  # Explicitly handled
+        options = 0  # Explicitly handled
         int_params = [0, 0, 0, 0, 0, 0, 0, 0]  # Not used for ray-type sensors
         float_params = [
-            0.0,  # Offset
-            np.linalg.norm(np.array(end_position) - np.array(start_position)),  # Range (distance between start and end)
+            0.02,  # Offset
+            np.linalg.norm(np.array(end_position) - np.array(start_position))-2*0.02,  # Range (distance between start and end)
             0.0,  # X size (not used for ray-type sensors)
             0.0,  # Y size (not used for ray-type sensors)
             0.0,  # X size far (not used for ray-type sensors)
@@ -961,6 +961,25 @@ def move_effector_to(sim, simIK, ik_environment, ik_group, dummy_target, target_
 
     # Perform IK and sync joints
     apply_ik_to_sim(simIK, ik_environment, ik_group)
+
+
+def move_effector_to_2(ik_environment, ik_group, dummy_target, target_position):
+    """
+    Moves the robot's end-effector to a target position using IK,
+    while keeping the orientation facing downward.
+
+    Args:
+        sim: The sim module.
+        simIK: The simIK module.
+        ik_environment: The IK environment handle.
+        ik_group: The IK group handle.
+        dummy_target: The dummy handle used as the target.
+        target_position: The 3D [x, y, z] world position to move to.
+    """
+    client = RemoteAPIClient()
+    sim = client.require('sim')
+    simIK = client.require('simIK')
+    move_effector_to(sim, simIK, ik_environment, ik_group, dummy_target, target_position)
 
 #---------------------------------------------
 # Drag the paddle along a path
