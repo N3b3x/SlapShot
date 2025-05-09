@@ -642,8 +642,8 @@ def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts
     robot_right = _load_robot_at(right_robot_base_pos, "RobotRight")
 
     # Get end effectors (assumes "link7_visible" as the end)
-    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/link7_visible")
-    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/link7_visible")
+    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/connection")
+    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/connection")
 
     if attach_paddles:
         # Attach paddles and position them inside respective goals
@@ -651,8 +651,8 @@ def load_and_place_robot_pair(sim, attach_paddles=True, disable_attached_scripts
         attach_paddle(sim, eff_right, [0, 1, 0], "RightPaddle")
 
     # Get end effectors (assumes "link7_visible" as the end)
-    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/link7_visible/LeftPaddle")
-    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/link7_visible/RightPaddle")
+    eff_left = sim.getObject(f"{sim.getObjectAlias(robot_left, 2)}/connection/LeftPaddle")
+    eff_right = sim.getObject(f"{sim.getObjectAlias(robot_right, 2)}/connection/RightPaddle")
     
     return {
         'robot_left': robot_left,
@@ -678,12 +678,12 @@ def attach_paddle(sim, effector_handle, color, name):
     sim.setShapeColor(paddle, None, sim.colorcomponent_ambient_diffuse, color)
     sim.setObjectParent(paddle, effector_handle, False)
     
-    sim.setObjectPosition(paddle, [-0.0275, 0, 0], sim.handle_parent)  # Slight offset to lie flat
-    sim.setObjectOrientation(paddle, [0, -math.radians(90), 0], sim.handle_parent)
+    sim.setObjectPosition(paddle, [0, 0, 0.01], sim.handle_parent)  # Slight offset to lie flat
+    sim.setObjectOrientation(paddle, [0, 0, -math.radians(90)], sim.handle_parent)
     sim.setObjectAlias(paddle, name)
     
     apply_physics_properties(sim, paddle, {
-        'dynamic': False,  # Paddles are typically static since they are controlled by the robot
+        # 'dynamic': True,  # Paddles are typically static since they are controlled by the robot
         'respondable': True,
         'bullet.friction': paddle_friction,
         'bullet.frictionOld': paddle_friction,

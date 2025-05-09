@@ -220,7 +220,7 @@ class HockeyAgent:
         if is_left_agent:
             x_edge = strike_zone["x_min"] + 0.1
         else:
-            x_edge = strike_zone["x_max"] + 0.1
+            x_edge = strike_zone["x_max"] - 0.1
         y_center = (strike_zone["y_min"] + strike_zone["y_max"]) / 2
         return [x_edge, y_center, self.base_position[2]]
 
