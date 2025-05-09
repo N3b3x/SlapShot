@@ -159,8 +159,8 @@ class PuckTracker:
         Detect the puck's position and return both board-centered (meters) and pixel coordinates.
         Returns:
             dict: {
-                "board": (x, y) in meters, board-centered,
-                "pixel": (cx, cy) in image pixels
+            "board": (x, y) in meters, board-centered,
+            "pixel": (cx, cy) in image pixels
             }
             or None if not detected.
         """
@@ -189,9 +189,8 @@ class PuckTracker:
             self.prev_positions.append(pos_board)
             if len(self.prev_positions) > 5:
                 self.prev_positions.pop(0)
-            avg_pos = np.mean(self.prev_positions, axis=0)
             self.last_puck_detected_time = time.time()  # Update last seen time
-            return {"board": tuple(avg_pos), "pixel": pos_pixel}
+            return {"board": pos_board, "pixel": pos_pixel}
         print("[DEBUG] No puck detected")
         return None
 
