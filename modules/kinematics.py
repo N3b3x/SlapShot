@@ -1,13 +1,31 @@
 import numpy as np
 import sympy as sp
 from sympy import symbols
-from dh_tables import ur3_dh_table
+import modules.dh_tables
 from scipy.spatial.transform import Rotation
+
+def get_transform(a, alpha, d, theta):
+    return sp.Matrix([
+        [sp.cos(theta), -sp.sin(theta) * sp.cos(alpha), sp.sin(theta) * sp.sin(alpha), a * sp.cos(theta)],
+        [sp.sin(theta),  sp.cos(theta) * sp.cos(alpha), -sp.cos(theta) * sp.sin(alpha), a * sp.sin(theta)],
+        [0,              sp.sin(alpha), sp.cos(alpha), d],
+        [0,              0, 0, 1]
+    ])
+
+def get_forward_kinematics(dh_table):
+
+    T = sp.eye(4)
+    transforms = [T]
+    for link in dh_table:
+        T = T * get_transform(link['a'], link['alpha'], link['d'], link['theta'])
+        transforms.append(T)
+    
+    return transforms
 
 class Ur3Solver:
     def __init__(self):
         
-        self.dh_table = ur3_dh_table
+        self.dh_table = dh_tables.ur3_dh_table
 
     def perform_position_ik(self, X_ee, R_ee):
         
