@@ -48,3 +48,5 @@ r_c6x = sp.Symbol(r'r_{c_6,x}')
 r_c6y = sp.Symbol(r'r_{c_6,y}')
 r_c6z = sp.Symbol(r'r_{c_6,z}')
 r_c6 = sp.Matrix([r_c6x, r_c6y, r_c6z])
+
+g = sp.symbols('g') #acceleration due to gravity scalar

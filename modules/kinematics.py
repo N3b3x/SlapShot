@@ -22,6 +22,34 @@ def get_forward_kinematics(dh_table):
     
     return transforms
 
+def build_symbolic_com_jacobians(origins, z_vectors, com_positions):
+    """
+    Constructs the Jacobian matrices (linear + angular) for the centers of mass of each link.
+
+    Parameters:
+    - origins: list of sympy Matrix, position of each joint frame (length N+1)
+    - z_vectors: list of sympy Matrix, z-axis of each joint frame (length N)
+    - com_positions: list of sympy Matrix, center of mass positions for each link (length N)
+
+    Returns:
+    - jacobians: list of sympy Matrix, each 6xN Jacobian for a link's CoM
+    """
+    num_joints = len(z_vectors)
+    jacobians = []
+
+    for link_idx in range(num_joints):
+        J = sp.zeros(3, num_joints)
+        o_c = com_positions[link_idx]
+        for j in range(link_idx + 1):
+            o_n = origins[j]
+            z_n = z_vectors[j]
+            J[:3, j] = sp.simplify(z_n.cross(o_c - o_n) ) # Linear velocity Jacobian
+            # J[3:, j] = z_n                   # Angular velocity Jacobian
+        jacobians.append(J)
+
+    return jacobians
+
+
 class Ur3Solver:
     def __init__(self):
         
