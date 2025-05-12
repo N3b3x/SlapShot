@@ -115,10 +115,28 @@ def main(sim_file=None):
     # Define strike depth (how far into the board the agent can go)
     STRIKE_DEPTH = 0.2
 
-    # Initialize agents for both robots, passing strike_depth
+    # Initialize agents for both robots, passing strike_depth and target_dummy
     agents = {
-        "left": HockeyAgent(handles['ik_environment'], handles['left_ik_group'], handles['effector_left'], handles['robot_left'], tracker, strike_depth=STRIKE_DEPTH),
-        "right": HockeyAgent(handles['ik_environment'], handles['right_ik_group'], handles['effector_right'], handles['robot_right'], tracker, strike_depth=STRIKE_DEPTH)
+        "left": HockeyAgent(
+            handles['ik_environment'],
+            handles['left_ik_group'],
+            handles['effector_left'],
+            handles['robot_left'],
+            tracker,
+            handles['left_target_dummy'],
+            handles['left_joints'],  # Pass joint handles
+            strike_depth=STRIKE_DEPTH
+        ),
+        "right": HockeyAgent(
+            handles['ik_environment'],
+            handles['right_ik_group'],
+            handles['effector_right'],
+            handles['robot_right'],
+            tracker,
+            handles['right_target_dummy'],
+            handles['right_joints'],  # Pass joint handles
+            strike_depth=STRIKE_DEPTH
+        )
     }
 
     # Enable agents (this will set and update the strike zones in the tracker for overlay)
@@ -133,16 +151,11 @@ def main(sim_file=None):
 
     try:
         while not stop_event.is_set():
-            # For each agent, get their recommended position and apply it to the robot arm
+            # For each agent, get their recommended position and queue it for smooth motion
             for side, agent in agents.items():
                 recommended_position = agent.get_recommended_position()
                 if recommended_position is not None:
-                    scene_builder.move_effector_to_2(
-                        handles['ik_environment'],
-                        handles[f"{side}_ik_group"],
-                        handles[f"{side}_target_dummy"],
-                        recommended_position
-                    )
+                    agent.queue_motion(recommended_position)
 
             # Check for goals using the referee
             goal_side = referee.check_goal()
@@ -168,7 +181,7 @@ def main(sim_file=None):
                 initialize_puck_for_side(sim, handles['puck'], side)
                 tracker.last_puck_detected_time = time.time()
 
-            #time.sleep(0.01)
+            time.sleep(0.01)
     except KeyboardInterrupt:
         print("\n[INFO] Stopping simulation...")
     finally:

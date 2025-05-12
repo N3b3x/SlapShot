@@ -2,9 +2,10 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 import numpy as np
 import threading
 import time
+import queue
 
 class HockeyAgent:
-    def __init__(self, ik_environment, ik_group, effector_handle, robot_handle, puck_tracker, strike_depth=0.25):
+    def __init__(self, ik_environment, ik_group, effector_handle, robot_handle, puck_tracker, target_dummy_handle, joint_handles, strike_depth=0.25):
         """
         Initialize the HockeyAgent.
 
@@ -16,6 +17,8 @@ class HockeyAgent:
             effector_handle: The handle to the robot's end-effector.
             robot_handle: The handle to the robot's base.
             puck_tracker: The PuckTracker instance to dynamically acquire court bounds and other parameters.
+            target_dummy_handle: The handle to the IK target dummy for this agent.
+            joint_handles: List of joint handles for the robot.
         """
         self.client = RemoteAPIClient()
         self.sim = self.client.require('sim')
@@ -25,6 +28,7 @@ class HockeyAgent:
         self.effector = effector_handle
         self.puck_tracker = puck_tracker
         self.robot_handle = robot_handle
+        self.target_dummy = target_dummy_handle
         self.running = True
         self.enabled = False  # Add an enabled flag to control the agent
         self.recommended_position = None
@@ -32,6 +36,13 @@ class HockeyAgent:
         self.thread = threading.Thread(target=self._update_agent, daemon=True)
         self.thread.start()
         self.strike_depth = strike_depth
+        self.motion_queue = queue.Queue()
+        self.motion_thread = threading.Thread(target=self._follow_motion_plan, daemon=True)
+        self.motion_thread.start()
+        self.last_target = None  # Track last target to avoid redundant moves
+        self.puck_data = {"position": None, "velocity": None, "z_height": None}
+        self.joint_handles = joint_handles
+        print(f"[INFO] Joint handles for robot {robot_handle}: {self.joint_handles}")
 
     def enable(self):
         """
@@ -161,7 +172,12 @@ class HockeyAgent:
 
         # If puck is in strike zone, go to it
         if in_strike_zone(pos_board):
-            return [pos_board[0], pos_board[1], self.base_position[2]]
+            # Add a small offset behind the puck so we can push forward
+            if is_left_agent:
+                offset = -0.02  # place behind for left side
+            else:
+                offset = 0.02   # place behind for right side
+            return [pos_board[0] + offset, pos_board[1], self.base_position[2]]
 
         # If puck is in STRIKE_DEPTH band but outside strike zone (i.e., y out of bounds), try to "kick" it out
         x, y = pos_board
@@ -238,16 +254,99 @@ class HockeyAgent:
         with self.lock:
             return self.recommended_position
 
+    def _generate_path(self, target_xyz):
+        """
+        Move the target dummy to the desired target_xyz, then use simIK.generatePath
+        to find a joint-space path for driving the IK tip (self.effector) to that target.
+
+        Returns:
+            list: A flattened list of joint configurations in row-major order, or None if it fails.
+        """
+        # Place our IK target dummy at the desired world coordinate
+        self.sim.setObjectPosition(self.target_dummy, self.sim.handle_world, target_xyz.tolist())
+
+        try:
+            path_point_count = 20  # Increase or decrease for finer or coarser joint stepping
+            config_list = self.simIK.generatePath(
+                self.ik_environment,
+                self.ik_group,
+                self.joint_handles,  # Adapt to match your actual joint handles
+                self.effector,       # Tip handle
+                path_point_count
+            )
+            if not config_list:
+                print(f"[ERROR] Failed to generate path to target: {target_xyz}")
+                return None
+            return config_list
+        except Exception as e:
+            print(f"[ERROR] Exception during path generation: {e}")
+            return None
+
+    def _follow_motion_plan(self):
+        while self.running:
+            if not self.enabled:
+                time.sleep(0.05)
+                continue
+            try:
+                # Always pick the most recent target
+                while True:
+                    target = self.motion_queue.get(timeout=0.1)
+                    while not self.motion_queue.empty():
+                        target = self.motion_queue.get_nowait()
+                    break
+            except queue.Empty:
+                continue
+
+            self.last_target = target
+            # Generate a path to the new target
+            path = self._generate_path(np.array(target))
+            if not path:
+                time.sleep(0.05)
+                continue
+
+            # Each path point has len(self.joint_handles) entries
+            n_joints = len(self.joint_handles)
+            total_steps = len(path) // n_joints
+
+            for i in range(total_steps):
+                # Check if a new target arrived
+                if not self.motion_queue.empty():
+                    print("[INFO] New target detected, replanning...")
+                    break
+
+                # Apply the i-th configuration to each joint
+                for j, joint in enumerate(self.joint_handles):
+                    self.sim.setJointPosition(joint, path[i * n_joints + j])
+
+                # Sync IK to sim
+                from modules.scene_builder import apply_ik_to_sim
+                apply_ik_to_sim(self.simIK, self.ik_environment, self.ik_group)
+
+                time.sleep(0.01)
+
+    def queue_motion(self, target):
+        # Only queue if target is different from last
+        if self.last_target is None or not np.allclose(self.last_target, target, atol=1e-4):
+            # Clear the queue before putting new target
+            while not self.motion_queue.empty():
+                try:
+                    self.motion_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self.motion_queue.put(target)
+            print(f"[INFO] New motion target queued: {target}")
+
     def shutdown(self):
         """
         Stop the agent's thread and clean up resources.
         """
         self.running = False
         self.thread.join()
+        self.motion_thread.join()
 
     def __del__(self):
         """
         Ensure the agent's thread is stopped when the object is destroyed.
         """
-        if hasattr(self, 'thread'):  # Check if thread exists before calling shutdown
+        if hasattr(self, 'thread'):
             self.shutdown()
